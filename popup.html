@@ -27,9 +27,13 @@
   </div>
 
   <div class="tab-content" id="tab-dictionary">
-    <div class="toolbar">
+    <div class="toolbar dict-toolbar">
       <input type="text" id="dict-search" placeholder="Поиск по словарю...">
+      <button id="dict-export-btn" class="ghost-btn icon-btn" title="Скачать словарь как JSON">⬇</button>
+      <label for="dict-import-input" id="dict-import-label" class="ghost-btn icon-btn" title="Загрузить словарь из JSON">⬆</label>
+      <input type="file" id="dict-import-input" accept=".json" style="display:none">
     </div>
+    <div id="dict-import-status" class="dict-import-status" style="display:none"></div>
     <div id="dictionary-list" class="dictionary-list">
       <p class="empty-state">Словарь пуст. Кликай по словам в субтитрах, чтобы добавить их.</p>
     </div>

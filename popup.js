@@ -632,17 +632,75 @@ async function restoreFromSync() {
   });
 }
 
+// ===== Export / Import =====
+function exportDictionary() {
+  if (dictionary.length === 0) return;
+  const json = JSON.stringify(dictionary, null, 2);
+  const blob = new Blob([json], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `rezka-dictionary-${new Date().toISOString().slice(0, 10)}.json`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+async function importDictionary(file) {
+  const statusEl = document.getElementById('dict-import-status');
+  const showStatus = (msg, type) => {
+    statusEl.textContent = msg;
+    statusEl.className = `dict-import-status ${type}`;
+    statusEl.style.display = 'block';
+    setTimeout(() => { statusEl.style.display = 'none'; }, 4000);
+  };
+
+  try {
+    const text = await file.text();
+    const imported = JSON.parse(text);
+    if (!Array.isArray(imported)) throw new Error('not an array');
+
+    let added = 0;
+    for (const entry of imported) {
+      if (!entry.word) continue;
+      if (dictionary.some((d) => d.word.toLowerCase() === entry.word.toLowerCase())) continue;
+      dictionary.unshift({
+        id:          entry.id          ?? `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        word:        entry.word,
+        translation: entry.translation ?? '',
+        context:     entry.context     ?? '',
+        source:      entry.source      ?? null,
+        addedAt:     entry.addedAt     ?? Date.now(),
+        interval:    entry.interval    ?? 0,
+        repetitions: entry.repetitions ?? 0,
+        easeFactor:  entry.easeFactor  ?? 2.5,
+        dueAt:       entry.dueAt       ?? Date.now(),
+      });
+      added++;
+    }
+
+    await storageSet(STORE_KEYS.DICTIONARY, dictionary);
+    backupToSync(dictionary);
+    renderDictionary(document.getElementById('dict-search')?.value || '');
+    showStatus(`Импортировано: ${added} новых слов`, 'ok');
+  } catch {
+    showStatus('Ошибка: неверный формат файла', 'err');
+  }
+}
+
 // ===== Init =====
 async function init() {
   setupTabs();
 
-  // Если ключ словаря есть в local — используем его, иначе пробуем восстановить из sync
+  // Используем local, только если там есть данные; иначе восстанавливаем из sync.
+  // Это нужно, чтобы словарь восстанавливался после переустановки или на другом компьютере.
   const localRes = await new Promise(r => chrome.storage.local.get('rsd_dictionary', r));
-  if ('rsd_dictionary' in localRes) {
-    dictionary = localRes.rsd_dictionary || [];
-    if (dictionary.length > 0) backupToSync(dictionary); // актуализируем бэкап
+  const localDict = localRes.rsd_dictionary;
+  if (Array.isArray(localDict) && localDict.length > 0) {
+    dictionary = localDict;
+    backupToSync(dictionary); // актуализируем бэкап
   } else {
-    // Свежая установка — пробуем восстановить
     dictionary = await restoreFromSync();
     if (dictionary.length > 0) await storageSet(STORE_KEYS.DICTIONARY, dictionary);
   }
@@ -666,6 +724,14 @@ async function init() {
 
   document.getElementById('dict-search').addEventListener('input', (e) => {
     renderDictionary(e.target.value);
+  });
+
+  document.getElementById('dict-export-btn').addEventListener('click', exportDictionary);
+
+  document.getElementById('dict-import-input').addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (file) importDictionary(file);
+    e.target.value = ''; // сбрасываем, чтобы повторный выбор того же файла тоже срабатывал
   });
 
   // Тихая проверка обновлений при каждом открытии попапа
