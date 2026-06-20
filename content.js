@@ -11,6 +11,7 @@
   let wordSources   = new Map(); // lowerCase(word) → DOM-элемент строки субтитра
   let fetchId       = 0;
   let lastContext   = '';
+  let _tipX = 0, _tipY = 0; // последние координаты клика для перепозиционирования
 
   // ─── Стили ──────────────────────────────────────────────────────────────────
   function injectStyles() {
@@ -19,7 +20,14 @@
     s.id = 'rsd-styles';
     s.textContent = `
       #pjs_cdnplayer_subtitle,
-      #pjs_cdnplayer_subtitle * { cursor: pointer !important; outline: none !important; }
+      #pjs_cdnplayer_subtitle * { cursor: pointer !important; }
+
+      #pjs_cdnplayer_subtitle:focus,
+      #pjs_cdnplayer_subtitle *:focus {
+        outline: none !important;
+        border: none !important;
+        box-shadow: none !important;
+      }
 
       .rsd-highlight {
         color: #f0fffe !important;
@@ -345,6 +353,7 @@
         transl.textContent = entry.translation;
         addBtn.textContent = '✓ В словаре';
         addBtn.disabled = true;
+        repositionTooltip();
         return;
       }
     }
@@ -360,10 +369,19 @@
         addBtn.textContent = '✓ Добавлено';
         addBtn.disabled = true;
       };
+      repositionTooltip();
     } catch {
       if (myId !== fetchId) return;
       transl.textContent = '(ошибка перевода)';
+      repositionTooltip();
     }
+  }
+
+  function repositionTooltip() {
+    const tooltip = document.getElementById('rsd-tooltip');
+    if (!tooltip || tooltip.style.display === 'none') return;
+    // Ждём один кадр — к этому моменту браузер уже отрисовал новый текст
+    requestAnimationFrame(() => positionTooltip(tooltip, _tipX, _tipY));
   }
 
   function getFromDict(word) {
@@ -376,10 +394,12 @@
   }
 
   function positionTooltip(tooltip, x, y) {
+    _tipX = x; _tipY = y;
     const tw = Math.max(tooltip.offsetWidth, 180);
-    const th = Math.max(tooltip.offsetHeight, 90);
-    let top = y - th - 12;
-    if (top < 10) top = y + 12;
+    // Берём реальную высоту, но не меньше 150px — покрывает тултип с переводом
+    const th = Math.max(tooltip.offsetHeight, 150);
+    let top = y - th - 16;
+    if (top < 10) top = y + 16;
     let left = x - tw / 2;
     if (left < 10) left = 10;
     if (left + tw > window.innerWidth - 10) left = window.innerWidth - tw - 10;
@@ -438,6 +458,10 @@
         const word = getWordAtPoint(e.clientX, e.clientY);
         if (word) {
           e.stopPropagation(); // не даём плееру обработать (пауза и т.д.)
+          // Снимаем фокус с контейнера субтитров, чтобы плеер не рисовал рамку
+          if (document.activeElement && document.activeElement !== document.body) {
+            document.activeElement.blur();
+          }
           const context = extractSubtitleText(container);
           toggleWord(word, e.clientX, e.clientY, context);
           return;
