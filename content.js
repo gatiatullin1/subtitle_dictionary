@@ -149,20 +149,42 @@
 
   // ─── Определение слова под курсором ─────────────────────────────────────────
   function getWordAtPoint(x, y) {
-    // caretRangeFromPoint — Chrome-only, для расширения подходит идеально
     const range = document.caretRangeFromPoint(x, y);
-    if (!range || range.startContainer.nodeType !== Node.TEXT_NODE) return null;
+    if (!range) return null;
 
-    const text = range.startContainer.textContent;
-    const pos = range.startOffset;
+    let node = range.startContainer;
+    let pos  = range.startOffset;
 
-    let start = pos;
-    let end = pos;
-    while (start > 0 && /[A-Za-z']/.test(text[start - 1])) start--;
-    while (end < text.length && /[A-Za-z']/.test(text[end])) end++;
+    // Если попали на элемент (не текстовый узел) — ищем первый текстовый потомок
+    if (node.nodeType !== Node.TEXT_NODE) {
+      const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT);
+      const textNode = walker.nextNode();
+      if (!textNode) return null;
+      node = textNode;
+      pos  = 0;
+    }
 
-    const word = text.slice(start, end);
-    return /[A-Za-z]/.test(word) ? word : null;
+    return wordNear(node.textContent, pos);
+  }
+
+  // Ищет слово в тексте начиная с pos, затем расширяет поиск на ±5 символов
+  // (на случай клика на пробел или пунктуацию между словами)
+  function wordNear(text, pos) {
+    const safe = Math.min(Math.max(pos, 0), text.length);
+    for (let d = 0; d <= 5; d++) {
+      for (const p of (d === 0 ? [safe] : [safe - d, safe + d])) {
+        if (p < 0 || p >= text.length) continue;
+        if (!/[A-Za-z']/.test(text[p])) continue;
+
+        let s = p, e = p;
+        while (s > 0 && /[A-Za-z']/.test(text[s - 1])) s--;
+        while (e < text.length && /[A-Za-z']/.test(text[e])) e++;
+
+        const word = text.slice(s, e);
+        if (/[A-Za-z]/.test(word)) return word;
+      }
+    }
+    return null;
   }
 
   // ─── Субтитры ────────────────────────────────────────────────────────────────
