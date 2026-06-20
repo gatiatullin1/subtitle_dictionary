@@ -432,15 +432,19 @@
   }
 
   function extractPageTitle() {
-    let t = document.title;
-    t = t.replace(/\s*[-–|]\s*hdrezka[.\w]*/gi, '');
+    // og:title чище document.title на большинстве стриминг-сайтов
+    const og = document.querySelector('meta[property="og:title"]');
+    let t = (og && og.content) ? og.content : document.title;
+    // Убираем название сайта в конце: "– hdrezka.ag", "| rezka.ag" и т.п.
+    t = t.replace(/\s*[-–|]\s*(?:hd)?rezka[\.\w]*/gi, '');
+    // Без разделителя в конце: "Movie rezka.ag"
+    t = t.replace(/\s+(?:hd)?rezka\.\w+\s*$/i, '');
     t = t.replace(/\s*смотреть.*/i, '');
     t = t.replace(/\s*watch.*/i, '');
     t = t.replace(/\s*онлайн.*/i, '');
     t = t.replace(/\s*бесплатно.*/i, '');
-    // Убираем год в конце: (2015), (2015-2022), (2019 - )
-    t = t.replace(/\s*\(\d{4}[\s–\-]*\d*\)\s*$/, '');
-    return t.trim() || document.location.hostname;
+    // Год оставляем: "(2015)" или "(2015-2022)"
+    return t.trim(); // пустую строку обработает popup ("Без источника")
   }
 
   function saveWord(word, context, translation) {

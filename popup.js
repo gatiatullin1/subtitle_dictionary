@@ -163,12 +163,13 @@ function promptRenameSource(url, currentName) {
 function extractCleanTitle(raw) {
   if (!raw) return '';
   let t = raw;
-  t = t.replace(/\s*[-–|]\s*hdrezka[.\w]*/gi, '');
+  t = t.replace(/\s*[-–|]\s*(?:hd)?rezka[\.\w]*/gi, '');
+  t = t.replace(/\s+(?:hd)?rezka\.\w+\s*$/i, '');
   t = t.replace(/\s*смотреть.*/i, '');
   t = t.replace(/\s*watch.*/i, '');
   t = t.replace(/\s*онлайн.*/i, '');
   t = t.replace(/\s*бесплатно.*/i, '');
-  t = t.replace(/\s*\(\d{4}[\s–\-]*\d*\)\s*$/, '');
+  // Год оставляем в заголовке: "(2015)", "(2015-2022)"
   return t.trim();
 }
 
