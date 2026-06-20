@@ -6,7 +6,8 @@
   let observer = null;
   let observedNode = null;
   let searchInterval = null;
-  let activeWord = null;   // слово в открытом тултипе
+  let activeWord = null;
+  let mutationDebounce = null;
 
   // ─── Стили, инжектируемые на страницу ───────────────────────────────────────
   function injectStyles() {
@@ -197,8 +198,19 @@
 
   // ─── Субтитры ────────────────────────────────────────────────────────────────
   function isVisible(el) {
-    const st = window.getComputedStyle(el);
-    return st.display !== 'none' && st.visibility !== 'hidden' && parseFloat(st.opacity) > 0;
+    // Проходим вверх по дереву — плеер может скрывать трек через родительский контейнер
+    let node = el;
+    while (node && node !== document.body) {
+      const st = window.getComputedStyle(node);
+      if (
+        st.display === 'none' ||
+        st.visibility === 'hidden' ||
+        parseFloat(st.opacity) < 0.01
+      ) return false;
+      node = node.parentElement;
+    }
+    // Элемент без реальных размеров — не рендерится
+    return el.offsetHeight > 0 || el.offsetWidth > 0;
   }
 
   function extractSubtitleText(node) {
@@ -251,15 +263,19 @@
   }
 
   function handleMutation(container) {
-    const text = extractSubtitleText(container);
-    if (text && text !== lastText) {
-      lastText = text;
-      chrome.runtime.sendMessage({
-        type: 'NEW_SUBTITLE_LINE',
-        text, url: window.location.href, title: document.title, timestamp: Date.now()
-      });
-      wrapWordsInContainer(container);
-    }
+    // Debounce 250ms — плеер может на мгновение показать оба трека при переключении
+    clearTimeout(mutationDebounce);
+    mutationDebounce = setTimeout(() => {
+      const text = extractSubtitleText(container);
+      if (text && text !== lastText) {
+        lastText = text;
+        chrome.runtime.sendMessage({
+          type: 'NEW_SUBTITLE_LINE',
+          text, url: window.location.href, title: document.title, timestamp: Date.now()
+        });
+        wrapWordsInContainer(container);
+      }
+    }, 250);
   }
 
   function attachObserver(container) {

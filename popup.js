@@ -432,12 +432,9 @@ async function checkForUpdates() {
   statusEl.className = 'update-status';
 
   try {
-    const res = await fetch(
-      'https://raw.githubusercontent.com/gatiatullin1/subtitle_dictionary/main/manifest.json',
-      { cache: 'no-store' }
-    );
-    if (!res.ok) throw new Error();
-    const remote = await res.json();
+    const result = await chrome.runtime.sendMessage({ type: 'CHECK_UPDATE' });
+    if (!result || !result.ok) throw new Error();
+    const remote = { version: result.version };
     const current = chrome.runtime.getManifest().version;
 
     if (remote.version !== current) {

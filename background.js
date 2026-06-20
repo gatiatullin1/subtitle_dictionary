@@ -45,4 +45,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     saveHistory([]).then(() => sendResponse({ ok: true }));
     return true;
   }
+
+  if (message.type === 'CHECK_UPDATE') {
+    fetch(
+      'https://raw.githubusercontent.com/gatiatullin1/subtitle_dictionary/main/manifest.json',
+      { cache: 'no-store' }
+    )
+      .then((res) => { if (!res.ok) throw new Error(); return res.json(); })
+      .then((data) => sendResponse({ ok: true, version: data.version }))
+      .catch(() => sendResponse({ ok: false }));
+    return true;
+  }
 });
