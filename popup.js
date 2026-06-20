@@ -37,7 +37,7 @@ function setupTabs() {
       document.querySelectorAll('.tab-content').forEach((c) => c.classList.remove('active'));
       btn.classList.add('active');
       document.getElementById(`tab-${btn.dataset.tab}`).classList.add('active');
-      if (btn.dataset.tab === 'dictionary') renderDictionary();
+      if (btn.dataset.tab === 'dictionary') { renderSourceFilter(); renderDictionary(); }
       if (btn.dataset.tab === 'practice') renderPractice();
       if (btn.dataset.tab === 'stats') renderStats();
     });
@@ -47,6 +47,7 @@ function setupTabs() {
 // ===== Word tooltip =====
 let subtitleHistory = [];
 let dictionary = [];
+let currentSource = null; // null = все источники
 
 let tooltipEl = null;
 let tooltipOutsideHandler = null;
@@ -69,7 +70,7 @@ function hideTooltip() {
   }
 }
 
-async function showWordTooltip(span, word, context) {
+async function showWordTooltip(span, word, context, source = null) {
   hideTooltip();
   const tooltip = getTooltip();
   const known = dictionary.find((d) => d.word.toLowerCase() === word.toLowerCase());
@@ -118,9 +119,10 @@ async function showWordTooltip(span, word, context) {
 
     addBtn.addEventListener('click', async (e) => {
       e.stopPropagation();
-      await addWordToDictionary(word, context, fetchedTranslation);
+      await addWordToDictionary(word, context, fetchedTranslation, source);
       addBtn.textContent = '✓ Добавлено';
       addBtn.disabled = true;
+      renderSourceFilter();
       renderSubtitleList();
     });
   }
@@ -132,6 +134,94 @@ async function showWordTooltip(span, word, context) {
     };
     document.addEventListener('click', tooltipOutsideHandler);
   }, 0);
+}
+
+// ===== Source names (переименование) =====
+// Хранятся в localStorage: { [url]: customName }
+function getSourceNames() {
+  try { return JSON.parse(localStorage.getItem('rsd_source_names') || '{}'); } catch { return {}; }
+}
+function setSourceName(url, name) {
+  const names = getSourceNames();
+  if (name) names[url] = name; else delete names[url];
+  localStorage.setItem('rsd_source_names', JSON.stringify(names));
+}
+function getSourceDisplayName(url, fallback) {
+  if (!url) return fallback || 'Без источника';
+  const names = getSourceNames();
+  return names[url] || fallback || 'Без источника';
+}
+
+function promptRenameSource(url, currentName) {
+  const newName = window.prompt(`Переименовать «${currentName}»:`, currentName);
+  if (newName === null) return; // отмена
+  setSourceName(url, newName.trim() || '');
+  renderSourceFilter();
+  renderDictionary(document.getElementById('dict-search')?.value || '');
+}
+
+// ===== Source filter =====
+
+function extractCleanTitle(raw) {
+  if (!raw) return '';
+  let t = raw;
+  t = t.replace(/\s*[-–|]?\s*hdrezka[.\w]*/gi, '');
+  t = t.replace(/\s*смотреть онлайн.*/i, '');
+  t = t.replace(/\s*watch online.*/i, '');
+  t = t.replace(/\s*бесплатно.*/i, '');
+  return t.trim();
+}
+
+function renderSourceFilter() {
+  const container = document.getElementById('source-filter');
+  if (!container) return;
+
+  const map = new Map(); // url → { rawTitle, count }
+  dictionary.forEach(d => {
+    const url   = d.source?.url   || '';
+    const title = d.source?.title || '';
+    if (!map.has(url)) map.set(url, { url, rawTitle: title, count: 0 });
+    map.get(url).count++;
+  });
+
+  if (map.size <= 1) { container.innerHTML = ''; return; }
+
+  const sources = [
+    { url: null, displayName: 'Все', count: dictionary.length },
+    ...Array.from(map.values()).map(s => ({
+      url: s.url,
+      displayName: getSourceDisplayName(s.url, s.rawTitle),
+      count: s.count
+    }))
+  ];
+
+  container.innerHTML = sources.map(s => {
+    const active = currentSource === s.url ? 'active' : '';
+    const key    = s.url === null ? '' : escapeHtml(s.url);
+    const label  = escapeHtml(s.displayName);
+    const editBtn = s.url
+      ? `<span class="pill-edit" data-url="${key}" title="Переименовать">✏️</span>`
+      : '';
+    return `<button class="source-pill ${active}" data-url="${key}" title="${label}">
+      ${label} <span class="pill-count">${s.count}</span>${editBtn}
+    </button>`;
+  }).join('');
+
+  container.querySelectorAll('.source-pill').forEach(btn => {
+    btn.addEventListener('click', e => {
+      // клик по ✏️ — переименовываем, не переключаем фильтр
+      if (e.target.classList.contains('pill-edit')) {
+        e.stopPropagation();
+        const url  = btn.dataset.url;
+        const name = btn.querySelector('.pill-count') ? btn.childNodes[0].textContent.trim() : '';
+        promptRenameSource(url, name);
+        return;
+      }
+      currentSource = btn.dataset.url === '' ? null : btn.dataset.url;
+      renderSourceFilter();
+      renderDictionary(document.getElementById('dict-search').value);
+    });
+  });
 }
 
 // ===== Subtitles list =====
@@ -216,7 +306,11 @@ function attachSubtitleListeners() {
       const id = card.dataset.id;
       const entry = subtitleHistory.find((ent) => ent.id === id);
       const context = entry ? entry.text.replace(/\n/g, ' ') : '';
-      showWordTooltip(span, word, context);
+      const source = entry ? {
+        title: extractCleanTitle(entry.pageTitle || ''),
+        url: (entry.url || '').replace(/#.*$/, '').replace(/\?.*$/, '')
+      } : null;
+      showWordTooltip(span, word, context, source);
     });
   });
 
@@ -236,7 +330,7 @@ function speak(text) {
 }
 
 // ===== Dictionary =====
-async function addWordToDictionary(word, context, prefetchedTranslation = null) {
+async function addWordToDictionary(word, context, prefetchedTranslation = null, source = null) {
   const normalized = word.toLowerCase();
   if (dictionary.some((d) => d.word.toLowerCase() === normalized)) {
     return; // уже есть
@@ -254,8 +348,8 @@ async function addWordToDictionary(word, context, prefetchedTranslation = null) 
     word: word,
     translation: translation,
     context: context,
+    source: source,
     addedAt: Date.now(),
-    // Параметры для упрощённого spaced repetition (вариант алгоритма SM-2)
     interval: 0,
     repetitions: 0,
     easeFactor: 2.5,
@@ -274,35 +368,49 @@ async function removeWordFromDictionary(id) {
 function renderDictionary(filter = '') {
   const container = document.getElementById('dictionary-list');
   const q = filter.trim().toLowerCase();
-  const list = q
-    ? dictionary.filter((d) => d.word.toLowerCase().includes(q) || d.translation.toLowerCase().includes(q))
-    : dictionary;
+
+  let list = dictionary;
+
+  // Фильтр по источнику
+  if (currentSource !== null) {
+    list = list.filter(d => (d.source?.url || '') === currentSource);
+  }
+
+  // Фильтр по поиску
+  if (q) {
+    list = list.filter(d =>
+      d.word.toLowerCase().includes(q) || d.translation.toLowerCase().includes(q)
+    );
+  }
 
   if (list.length === 0) {
     container.innerHTML = '<p class="empty-state">Словарь пуст. Кликай по словам в субтитрах, чтобы добавить их.</p>';
     return;
   }
 
+  // Показываем источник только когда не выбран конкретный фильм
+  const showSource = currentSource === null;
+
   container.innerHTML = list
-    .map(
-      (d) => `
+    .map(d => `
       <div class="dict-card" data-id="${d.id}">
         <div class="dict-word-block">
           <div class="dict-word">${escapeHtml(d.word)} <button class="speak-btn" data-speak="${escapeHtml(d.word)}" title="Озвучить">🔊</button></div>
           <div class="dict-translation">${escapeHtml(d.translation)}</div>
           ${d.context ? `<div class="dict-context">«${escapeHtml(d.context)}»</div>` : ''}
+          ${showSource && d.source ? `<div class="dict-source">${escapeHtml(getSourceDisplayName(d.source.url, d.source.title))}</div>` : ''}
         </div>
         <div class="dict-actions">
           <button class="icon-btn danger" data-remove="${d.id}" title="Удалить">✕</button>
         </div>
       </div>
-    `
-    )
+    `)
     .join('');
 
   container.querySelectorAll('[data-remove]').forEach((btn) => {
     btn.addEventListener('click', async () => {
       await removeWordFromDictionary(btn.dataset.remove);
+      renderSourceFilter();
       renderDictionary(document.getElementById('dict-search').value);
     });
   });
@@ -480,6 +588,7 @@ async function init() {
   setupTabs();
 
   dictionary = await storageGet(STORE_KEYS.DICTIONARY, []);
+  renderSourceFilter();
 
   const resp = await chrome.runtime.sendMessage({ type: 'GET_HISTORY' });
   subtitleHistory = (resp && resp.history) || [];

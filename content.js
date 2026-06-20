@@ -431,13 +431,26 @@
     speechSynthesis.speak(u);
   }
 
+  function extractPageTitle() {
+    let t = document.title;
+    t = t.replace(/\s*[-–|]?\s*hdrezka[.\w]*/gi, '');
+    t = t.replace(/\s*смотреть онлайн.*/i, '');
+    t = t.replace(/\s*watch online.*/i, '');
+    t = t.replace(/\s*бесплатно.*/i, '');
+    return t.trim() || document.location.hostname;
+  }
+
   function saveWord(word, context, translation) {
+    const source = {
+      title: extractPageTitle(),
+      url: window.location.href.replace(/#.*$/, '').replace(/\?.*$/, '')
+    };
     chrome.storage.local.get(['rsd_dictionary', 'rsd_stats'], res => {
       const dict = res.rsd_dictionary || [];
       if (dict.some(d => d.word.toLowerCase() === word.toLowerCase())) return;
       dict.unshift({
         id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-        word, translation, context,
+        word, translation, context, source,
         addedAt: Date.now(),
         interval: 0, repetitions: 0, easeFactor: 2.5, dueAt: Date.now()
       });

@@ -171,6 +171,59 @@ body {
   margin-top: 4px;
 }
 
+/* --- Source filter --- */
+#source-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  padding-bottom: 4px;
+}
+.source-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid #e0e0e0;
+  background: #fff;
+  border-radius: 20px;
+  padding: 3px 9px;
+  font-size: 11px;
+  cursor: pointer;
+  color: #555;
+  white-space: nowrap;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.source-pill:hover { background: #f0f4ff; border-color: #2563eb; color: #2563eb; }
+.source-pill.active { background: #2563eb; border-color: #2563eb; color: #fff; }
+.source-pill .pill-count {
+  background: rgba(0,0,0,0.08);
+  border-radius: 10px;
+  padding: 1px 5px;
+  font-size: 10px;
+  flex-shrink: 0;
+}
+.source-pill.active .pill-count { background: rgba(255,255,255,0.25); }
+.pill-edit {
+  font-size: 10px;
+  margin-left: 2px;
+  opacity: 0;
+  transition: opacity 0.15s;
+  cursor: pointer;
+  line-height: 1;
+}
+.source-pill:hover .pill-edit { opacity: 0.8; }
+.source-pill.active .pill-edit { opacity: 0.7; }
+
+.dict-source {
+  font-size: 11px;
+  color: #bbb;
+  margin-top: 3px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* --- Dictionary --- */
 .dict-card {
   background: #fff;
