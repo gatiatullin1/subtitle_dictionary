@@ -403,13 +403,63 @@ async function bumpStat(key) {
 async function renderStats() {
   const stats = await storageGet(STORE_KEYS.STATS, { wordsAdded: 0, reviewsDone: 0, linesTranslated: 0 });
   const dueCount = getDueCards().length;
+  const manifest = chrome.runtime.getManifest();
   const container = document.getElementById('stats-area');
   container.innerHTML = `
     <div class="stat-card"><div class="stat-value">${dictionary.length}</div><div class="stat-label">слов в словаре</div></div>
     <div class="stat-card"><div class="stat-value">${stats.reviewsDone || 0}</div><div class="stat-label">повторений сделано</div></div>
     <div class="stat-card"><div class="stat-value">${dueCount}</div><div class="stat-label">ждут повторения</div></div>
     <div class="stat-card"><div class="stat-value">${subtitleHistory.length}</div><div class="stat-label">строк субтитров в истории</div></div>
+    <div class="update-box">
+      <div class="update-top">
+        <span class="update-ver">v${manifest.version}</span>
+        <button id="check-update-btn" class="ghost-btn">Проверить обновления</button>
+      </div>
+      <div id="update-status" class="update-status"></div>
+    </div>
   `;
+
+  document.getElementById('check-update-btn').addEventListener('click', checkForUpdates);
+}
+
+async function checkForUpdates() {
+  const statusEl = document.getElementById('update-status');
+  const btn = document.getElementById('check-update-btn');
+  if (!statusEl || !btn) return;
+
+  btn.disabled = true;
+  statusEl.textContent = 'Проверяем...';
+  statusEl.className = 'update-status';
+
+  try {
+    const res = await fetch(
+      'https://raw.githubusercontent.com/gatiatullin1/subtitle_dictionary/main/manifest.json',
+      { cache: 'no-store' }
+    );
+    if (!res.ok) throw new Error();
+    const remote = await res.json();
+    const current = chrome.runtime.getManifest().version;
+
+    if (remote.version !== current) {
+      statusEl.innerHTML = `
+        Доступна версия <b>${remote.version}</b> (у вас ${current}).<br>
+        Запустите <code>update.bat</code>, затем нажмите кнопку ниже.
+        <button id="reload-ext-btn" class="reload-btn">Перезагрузить расширение</button>
+      `;
+      statusEl.className = 'update-status update-available';
+      document.getElementById('reload-ext-btn').addEventListener('click', () => {
+        chrome.runtime.reload();
+      });
+    } else {
+      statusEl.textContent = '✓ Актуальная версия';
+      statusEl.className = 'update-status update-ok';
+    }
+  } catch {
+    statusEl.textContent = 'Ошибка при проверке. Нет интернета?';
+    statusEl.className = 'update-status update-error';
+  }
+
+  btn.disabled = false;
 }
 
 // ===== Init =====

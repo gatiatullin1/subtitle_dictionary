@@ -305,6 +305,60 @@ body {
 }
 .speak-btn:hover { color: #2563eb; }
 
+/* --- Updates --- */
+.update-box {
+  grid-column: 1 / -1;
+  background: #fff;
+  border: 1px solid #eaeaea;
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.update-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.update-ver {
+  font-size: 12px;
+  color: #aaa;
+}
+
+.update-status {
+  font-size: 12px;
+  color: #555;
+  line-height: 1.6;
+}
+.update-status.update-ok { color: #639922; }
+.update-status.update-error { color: #e24b4a; }
+.update-status.update-available { color: #1a1a1a; }
+
+.update-status code {
+  background: #f0f0f0;
+  border-radius: 3px;
+  padding: 1px 5px;
+  font-size: 11px;
+  font-family: monospace;
+}
+
+.reload-btn {
+  display: block;
+  margin-top: 8px;
+  width: 100%;
+  border: none;
+  background: #2563eb;
+  color: #fff;
+  border-radius: 6px;
+  padding: 7px 12px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.reload-btn:hover { background: #1d4ed8; }
+
 /* --- Word tooltip --- */
 .word-tooltip {
   position: fixed;
