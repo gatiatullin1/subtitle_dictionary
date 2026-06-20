@@ -8,6 +8,7 @@
 
   // Мультивыбор слов
   let selectedWords = [];
+  let wordSources   = new Map(); // lowerCase(word) → DOM-элемент строки субтитра
   let fetchId       = 0;
   let lastContext   = '';
 
@@ -164,6 +165,7 @@
     const t = document.getElementById('rsd-tooltip');
     if (t) t.style.display = 'none';
     selectedWords = [];
+    wordSources.clear();
     fetchId++;
     removeHighlights();
   }
@@ -190,37 +192,47 @@
 
     if (observer) observer.disconnect();
 
-    const escaped = selectedWords.map(w => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
-    const regex = new RegExp(`\\b(${escaped.join('|')})\\b`, 'gi');
-
-    const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
-    const nodes = [];
-    let n;
-    while ((n = walker.nextNode())) {
-      if (n.textContent.trim() && !n.parentNode.classList.contains('rsd-highlight')) {
-        nodes.push(n);
-      }
+    // Группируем слова по элементу строки, из которого они были выбраны
+    const groups = new Map(); // element → words[]
+    for (const w of selectedWords) {
+      const el = wordSources.get(w.toLowerCase()) || container;
+      if (!groups.has(el)) groups.set(el, []);
+      groups.get(el).push(w);
     }
 
-    nodes.forEach(textNode => {
-      const text = textNode.textContent;
-      regex.lastIndex = 0;
-      if (!regex.test(text)) return;
-      regex.lastIndex = 0;
+    for (const [scope, words] of groups) {
+      const escaped = words.map(w => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+      const regex = new RegExp(`\\b(${escaped.join('|')})\\b`, 'gi');
 
-      const frag = document.createDocumentFragment();
-      let last = 0, m;
-      while ((m = regex.exec(text)) !== null) {
-        if (m.index > last) frag.appendChild(document.createTextNode(text.slice(last, m.index)));
-        const span = document.createElement('span');
-        span.className = 'rsd-highlight';
-        span.textContent = m[0];
-        frag.appendChild(span);
-        last = m.index + m[0].length;
+      const walker = document.createTreeWalker(scope, NodeFilter.SHOW_TEXT);
+      const nodes = [];
+      let n;
+      while ((n = walker.nextNode())) {
+        if (n.textContent.trim() && !n.parentNode.classList.contains('rsd-highlight')) {
+          nodes.push(n);
+        }
       }
-      if (last < text.length) frag.appendChild(document.createTextNode(text.slice(last)));
-      textNode.parentNode.replaceChild(frag, textNode);
-    });
+
+      nodes.forEach(textNode => {
+        const text = textNode.textContent;
+        regex.lastIndex = 0;
+        if (!regex.test(text)) return;
+        regex.lastIndex = 0;
+
+        const frag = document.createDocumentFragment();
+        let last = 0, m;
+        while ((m = regex.exec(text)) !== null) {
+          if (m.index > last) frag.appendChild(document.createTextNode(text.slice(last, m.index)));
+          const span = document.createElement('span');
+          span.className = 'rsd-highlight';
+          span.textContent = m[0];
+          frag.appendChild(span);
+          last = m.index + m[0].length;
+        }
+        if (last < text.length) frag.appendChild(document.createTextNode(text.slice(last)));
+        textNode.parentNode.replaceChild(frag, textNode);
+      });
+    }
 
     if (observer && observedNode) {
       observer.observe(observedNode, { childList: true, subtree: true, characterData: true });
@@ -237,14 +249,27 @@
     });
   }
 
+  // Возвращает непосредственный дочерний элемент контейнера субтитров, в который кликнули
+  function getLineElementAtPoint(x, y) {
+    const range = document.caretRangeFromPoint(x, y);
+    if (!range || !observedNode) return observedNode;
+    let node = range.startContainer;
+    while (node && node.parentNode !== observedNode) {
+      node = node.parentNode;
+    }
+    return (node && node !== observedNode) ? node : observedNode;
+  }
+
   function toggleWord(word, x, y, context) {
     lastContext = context;
     const lc = word.toLowerCase();
     const idx = selectedWords.findIndex(w => w.toLowerCase() === lc);
     if (idx !== -1) {
       selectedWords.splice(idx, 1);
+      wordSources.delete(lc);
     } else {
       selectedWords.push(word);
+      wordSources.set(lc, getLineElementAtPoint(x, y));
     }
     if (selectedWords.length > 1) selectedWords = sortByPosition(selectedWords, context);
 
@@ -278,6 +303,7 @@
       pill.querySelector('.rsd-pill-x').addEventListener('click', e => {
         e.stopPropagation();
         selectedWords = selectedWords.filter(sw => sw.toLowerCase() !== w.toLowerCase());
+        wordSources.delete(w.toLowerCase());
         if (selectedWords.length === 0) { hideTooltip(); return; }
         applyHighlights();
         renderPills();
