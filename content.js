@@ -65,6 +65,25 @@
         border-radius: 6px; padding: 6px 9px; font-size: 12px; cursor: pointer !important;
       }
       #rsd-tooltip-speak:hover, #rsd-tooltip-close:hover { background: rgba(255,255,255,0.22); }
+
+      #rsd-tooltip-drag {
+        margin: -12px -14px 8px;
+        padding: 6px 0 4px;
+        text-align: center;
+        cursor: grab;
+        border-radius: 10px 10px 0 0;
+        user-select: none;
+        -webkit-user-select: none;
+      }
+      #rsd-tooltip-drag::before {
+        content: '● ● ●';
+        font-size: 7px;
+        letter-spacing: 4px;
+        color: rgba(255,255,255,0.2);
+      }
+      #rsd-tooltip-drag:hover::before { color: rgba(255,255,255,0.5); }
+      #rsd-tooltip.rsd-dragging,
+      #rsd-tooltip.rsd-dragging #rsd-tooltip-drag { cursor: grabbing !important; }
     `;
     document.head.appendChild(s);
   }
@@ -79,6 +98,7 @@
     const div = document.createElement('div');
     div.id = 'rsd-tooltip';
     div.innerHTML = `
+      <div id="rsd-tooltip-drag"></div>
       <div id="rsd-tooltip-words"></div>
       <div id="rsd-tooltip-hint">ещё клик — добавить слово к фразе</div>
       <div id="rsd-tooltip-transl">...</div>
@@ -89,6 +109,29 @@
       </div>
     `;
     document.body.appendChild(div);
+
+    // Перетаскивание тултипа
+    let dragState = null;
+    div.querySelector('#rsd-tooltip-drag').addEventListener('mousedown', e => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const rect = div.getBoundingClientRect();
+      dragState = { ox: e.clientX - rect.left, oy: e.clientY - rect.top };
+      div.classList.add('rsd-dragging');
+    });
+    document.addEventListener('mousemove', e => {
+      if (!dragState) return;
+      const x = Math.max(0, Math.min(e.clientX - dragState.ox, window.innerWidth  - div.offsetWidth));
+      const y = Math.max(0, Math.min(e.clientY - dragState.oy, window.innerHeight - div.offsetHeight));
+      div.style.left = x + 'px';
+      div.style.top  = y + 'px';
+    }, true);
+    document.addEventListener('mouseup', () => {
+      if (!dragState) return;
+      dragState = null;
+      div.classList.remove('rsd-dragging');
+    }, true);
 
     div.querySelector('#rsd-tooltip-close').addEventListener('click', e => {
       e.stopPropagation();
