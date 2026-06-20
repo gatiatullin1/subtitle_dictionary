@@ -20,7 +20,17 @@
       #pjs_cdnplayer_subtitle,
       #pjs_cdnplayer_subtitle * { cursor: pointer !important; }
 
-      .rsd-highlight { color: #FFD700 !important; }
+      .rsd-highlight {
+        color: #f0fffe !important;
+        background: rgba(6, 182, 212, 0.38) !important;
+        border-radius: 5px !important;
+        padding: 1px 6px 3px !important;
+        box-shadow:
+          0 0 0 1.5px rgba(34, 211, 238, 0.55),
+          0 2px 16px rgba(6, 182, 212, 0.45) !important;
+        display: inline !important;
+        text-shadow: 0 0 18px rgba(103, 232, 249, 0.5) !important;
+      }
 
       #rsd-tooltip {
         position: fixed;
