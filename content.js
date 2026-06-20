@@ -128,6 +128,17 @@
   }
 
   // ─── Логика мультивыбора ─────────────────────────────────────────────────────
+
+  // Сортируем слова по порядку их появления в тексте субтитра
+  function sortByPosition(words, text) {
+    const lower = text.toLowerCase();
+    return [...words].sort((a, b) => {
+      const ia = lower.indexOf(a.toLowerCase());
+      const ib = lower.indexOf(b.toLowerCase());
+      return (ia === -1 ? Infinity : ia) - (ib === -1 ? Infinity : ib);
+    });
+  }
+
   function toggleWord(word, x, y, context) {
     lastContext = context;
     const lc = word.toLowerCase();
@@ -136,6 +147,10 @@
       selectedWords.splice(idx, 1);
     } else {
       selectedWords.push(word);
+    }
+    // Всегда держим слова в порядке предложения
+    if (selectedWords.length > 1) {
+      selectedWords = sortByPosition(selectedWords, context);
     }
 
     if (selectedWords.length === 0) {
