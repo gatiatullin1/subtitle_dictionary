@@ -1,14 +1,15 @@
 {
   "manifest_version": 3,
   "name": "Rezka Subtitle Dictionary",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Перевод субтитров и словарь слов для hdrezka.ag",
   "permissions": ["storage", "activeTab"],
   "host_permissions": [
     "*://*.hdrezka.ag/*",
     "*://*.rezka.ag/*",
     "https://translate.googleapis.com/*",
-    "https://raw.githubusercontent.com/*"
+    "https://raw.githubusercontent.com/*",
+    "https://cdn.jsdelivr.net/*"
   ],
   "background": {
     "service_worker": "background.js"

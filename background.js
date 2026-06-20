@@ -47,13 +47,25 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.type === 'CHECK_UPDATE') {
-    fetch(
-      'https://raw.githubusercontent.com/gatiatullin1/subtitle_dictionary/main/manifest.json',
-      { cache: 'no-store' }
-    )
-      .then((res) => { if (!res.ok) throw new Error(); return res.json(); })
-      .then((data) => sendResponse({ ok: true, version: data.version }))
-      .catch(() => sendResponse({ ok: false }));
+    // Пробуем jsDelivr (CDN, не блокируется), потом raw.githubusercontent.com
+    const urls = [
+      'https://cdn.jsdelivr.net/gh/gatiatullin1/subtitle_dictionary@main/manifest.json',
+      'https://raw.githubusercontent.com/gatiatullin1/subtitle_dictionary/main/manifest.json'
+    ];
+    (async () => {
+      for (const url of urls) {
+        try {
+          const res = await fetch(url, { cache: 'no-store' });
+          if (!res.ok) continue;
+          const data = await res.json();
+          if (data.version) {
+            sendResponse({ ok: true, version: data.version });
+            return;
+          }
+        } catch {}
+      }
+      sendResponse({ ok: false });
+    })();
     return true;
   }
 });
