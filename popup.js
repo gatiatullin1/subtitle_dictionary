@@ -44,9 +44,97 @@ function setupTabs() {
   });
 }
 
-// ===== Subtitles list =====
+// ===== Word tooltip =====
 let subtitleHistory = [];
 let dictionary = [];
+
+let tooltipEl = null;
+let tooltipOutsideHandler = null;
+
+function getTooltip() {
+  if (!tooltipEl) {
+    tooltipEl = document.createElement('div');
+    tooltipEl.className = 'word-tooltip';
+    document.body.appendChild(tooltipEl);
+  }
+  return tooltipEl;
+}
+
+function hideTooltip() {
+  const t = getTooltip();
+  t.style.display = 'none';
+  if (tooltipOutsideHandler) {
+    document.removeEventListener('click', tooltipOutsideHandler);
+    tooltipOutsideHandler = null;
+  }
+}
+
+async function showWordTooltip(span, word, context) {
+  hideTooltip();
+  const tooltip = getTooltip();
+  const known = dictionary.find((d) => d.word.toLowerCase() === word.toLowerCase());
+
+  tooltip.innerHTML = `
+    <div class="word-tooltip-word">${escapeHtml(word)}</div>
+    <div class="word-tooltip-transl">${known ? escapeHtml(known.translation) : '...'}</div>
+    <div class="word-tooltip-actions">
+      <button class="word-tooltip-add"${known ? ' disabled' : ''}>${known ? '✓ В словаре' : '+ В словарь'}</button>
+      <button class="word-tooltip-speak">🔊</button>
+      <button class="word-tooltip-close">✕</button>
+    </div>
+  `;
+  tooltip.style.display = 'block';
+
+  // Позиционируем под словом, не выходя за границы попапа
+  const rect = span.getBoundingClientRect();
+  const tipW = 200;
+  let left = rect.left;
+  if (left + tipW > window.innerWidth - 6) left = window.innerWidth - tipW - 6;
+  if (left < 6) left = 6;
+  tooltip.style.left = `${left}px`;
+  tooltip.style.top = `${rect.bottom + 4}px`;
+
+  const translEl = tooltip.querySelector('.word-tooltip-transl');
+  const addBtn = tooltip.querySelector('.word-tooltip-add');
+
+  tooltip.querySelector('.word-tooltip-speak').addEventListener('click', (e) => {
+    e.stopPropagation();
+    speak(word);
+  });
+  tooltip.querySelector('.word-tooltip-close').addEventListener('click', (e) => {
+    e.stopPropagation();
+    hideTooltip();
+  });
+
+  let fetchedTranslation = known ? known.translation : null;
+
+  if (!known) {
+    try {
+      fetchedTranslation = await translateText(word);
+      if (tooltip.style.display !== 'none') translEl.textContent = fetchedTranslation;
+    } catch {
+      if (tooltip.style.display !== 'none') translEl.textContent = '(ошибка перевода)';
+    }
+
+    addBtn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      await addWordToDictionary(word, context, fetchedTranslation);
+      addBtn.textContent = '✓ Добавлено';
+      addBtn.disabled = true;
+      renderSubtitleList();
+    });
+  }
+
+  // Закрыть при клике вне тултипа
+  setTimeout(() => {
+    tooltipOutsideHandler = (e) => {
+      if (!tooltip.contains(e.target)) hideTooltip();
+    };
+    document.addEventListener('click', tooltipOutsideHandler);
+  }, 0);
+}
+
+// ===== Subtitles list =====
 
 function escapeHtml(str) {
   const div = document.createElement('div');
@@ -119,16 +207,16 @@ function attachSubtitleListeners() {
     });
   });
 
-  // Клик по слову -> добавить в словарь
+  // Клик по слову → тултип с переводом и кнопкой добавления
   document.querySelectorAll('.word').forEach((span) => {
-    span.addEventListener('click', async () => {
+    span.addEventListener('click', (e) => {
+      e.stopPropagation();
       const word = span.dataset.word;
       const card = span.closest('.subtitle-card');
       const id = card.dataset.id;
-      const entry = subtitleHistory.find((e) => e.id === id);
+      const entry = subtitleHistory.find((ent) => ent.id === id);
       const context = entry ? entry.text.replace(/\n/g, ' ') : '';
-      await addWordToDictionary(word, context);
-      renderSubtitleList();
+      showWordTooltip(span, word, context);
     });
   });
 
@@ -148,16 +236,18 @@ function speak(text) {
 }
 
 // ===== Dictionary =====
-async function addWordToDictionary(word, context) {
+async function addWordToDictionary(word, context, prefetchedTranslation = null) {
   const normalized = word.toLowerCase();
   if (dictionary.some((d) => d.word.toLowerCase() === normalized)) {
     return; // уже есть
   }
-  let translation = '';
-  try {
-    translation = await translateText(word);
-  } catch (e) {
-    translation = '(ошибка перевода)';
+  let translation = prefetchedTranslation;
+  if (!translation) {
+    try {
+      translation = await translateText(word);
+    } catch (e) {
+      translation = '(ошибка перевода)';
+    }
   }
   const newEntry = {
     id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
