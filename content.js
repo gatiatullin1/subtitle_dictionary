@@ -396,10 +396,21 @@
   function positionTooltip(tooltip, x, y) {
     _tipX = x; _tipY = y;
     const tw = Math.max(tooltip.offsetWidth, 180);
-    // Берём реальную высоту, но не меньше 150px — покрывает тултип с переводом
-    const th = Math.max(tooltip.offsetHeight, 150);
-    let top = y - th - 16;
-    if (top < 10) top = y + 16;
+    const th = tooltip.offsetHeight || 150;
+
+    // Привязываемся к верху контейнера субтитров, а не к точке клика —
+    // тогда тултип гарантированно не залезет на текст при любой высоте.
+    const sub = observedNode || document.querySelector('#pjs_cdnplayer_subtitle');
+    const anchor = sub ? sub.getBoundingClientRect().top : y;
+    const gap = 14;
+
+    let top = anchor - th - gap;
+    // Если не хватает места выше — показываем ниже всего контейнера субтитров
+    if (top < 10) {
+      const subBottom = sub ? sub.getBoundingClientRect().bottom : y;
+      top = subBottom + gap;
+    }
+
     let left = x - tw / 2;
     if (left < 10) left = 10;
     if (left + tw > window.innerWidth - 10) left = window.innerWidth - tw - 10;
