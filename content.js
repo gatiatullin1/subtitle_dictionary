@@ -214,14 +214,12 @@
   }
 
   function extractSubtitleText(node) {
-    const italics = node.querySelectorAll('i');
-    if (italics.length > 0) {
-      const visible = Array.from(italics).filter(isVisible);
-      if (visible.length > 0) {
-        return visible.map((el) => el.textContent.trim()).filter(Boolean).join('\n');
-      }
+    const targets = getSubtitleTargets(node);
+    // Если getSubtitleTargets вернул сам контейнер — берём весь textContent
+    if (targets.length === 0 || targets[0] === node) {
+      return node.textContent.trim();
     }
-    return node.textContent.trim();
+    return targets.map(el => el.textContent.trim()).filter(Boolean).join('\n');
   }
 
   // Возвращает элементы, в которых лежит текст субтитров.
@@ -244,8 +242,6 @@
 
     const targets = getSubtitleTargets(container);
 
-    // Лог структуры для диагностики (видно в DevTools → Console на странице rezka)
-    console.log('[RSD] subtitle targets:', targets.map(el => el.tagName + ': ' + JSON.stringify(el.textContent.trim().slice(0, 40))));
 
     if (targets.length === 0) {
       if (observer) observer.observe(container, { childList: true, subtree: true, characterData: true });
