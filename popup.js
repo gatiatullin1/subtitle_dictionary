@@ -37,7 +37,9 @@ function setupTabs() {
       document.querySelectorAll('.tab-content').forEach((c) => c.classList.remove('active'));
       btn.classList.add('active');
       document.getElementById(`tab-${btn.dataset.tab}`).classList.add('active');
-      if (btn.dataset.tab === 'dictionary') { renderDictionary(); }
+      if (btn.dataset.tab === 'dictionary') {
+        storageGet(STORE_KEYS.DICTIONARY, []).then((d) => { dictionary = d; renderDictionary(); });
+      }
       if (btn.dataset.tab === 'practice') renderPractice();
       if (btn.dataset.tab === 'stats') renderStats();
     });
@@ -183,15 +185,16 @@ function escapeHtml(str) {
   return div.innerHTML;
 }
 
-function wrapWordsClickable(line) {
-  // Разбиваем строку на слова и пробелы/пунктуацию, каждое слово оборачиваем в span.word
-  return line.replace(/[A-Za-zÀ-ÖØ-öø-ÿ']+/g, (word) => {
-    const isKnown = dictionary.some(
-      (d) => d.word.toLowerCase() === word.toLowerCase()
-    );
+function wrapWordsClickable(rawLine) {
+  // Split on word boundaries: odd indices are words, even indices are non-word text.
+  // Non-word parts are HTML-escaped; words are wrapped in clickable spans.
+  // Accepts RAW text — do not pre-escape before calling this function.
+  return rawLine.split(/([A-Za-zÀ-ÖØ-öø-ÿ']+)/).map((part, i) => {
+    if (i % 2 === 0) return escapeHtml(part);
+    const isKnown = dictionary.some((d) => d.word.toLowerCase() === part.toLowerCase());
     const cls = isKnown ? 'word in-dict' : 'word';
-    return `<span class="${cls}" data-word="${escapeHtml(word)}">${escapeHtml(word)}</span>`;
-  });
+    return `<span class="${cls}" data-word="${escapeHtml(part)}">${escapeHtml(part)}</span>`;
+  }).join('');
 }
 
 function renderSubtitleList() {
@@ -204,7 +207,7 @@ function renderSubtitleList() {
   container.innerHTML = subtitleHistory
     .map((entry) => {
       const lines = entry.text.split('\n');
-      const htmlLines = lines.map((l) => wrapWordsClickable(escapeHtml(l))).join('<br>');
+      const htmlLines = lines.map((l) => wrapWordsClickable(l)).join('<br>');
       const translationBlock = entry.translation
         ? `<div class="subtitle-translation">${escapeHtml(entry.translation)}</div>`
         : '';
@@ -240,6 +243,7 @@ function attachSubtitleListeners() {
       try {
         const translation = await translateText(entry.text.replace(/\n/g, ' '));
         entry.translation = translation;
+        await bumpStat('linesTranslated');
         renderSubtitleList();
       } catch (e) {
         btn.textContent = 'Ошибка, повторить';
@@ -552,7 +556,7 @@ async function checkForUpdates() {
   try {
     const result = await chrome.runtime.sendMessage({ type: 'CHECK_UPDATE' });
     if (!result || !result.ok) throw new Error();
-    if (result.version !== current) {
+    if (isNewerVersion(result.version, current)) {
       showUpdateBanner(result.version, current);
       statusEl.innerHTML = `Доступна версия <b>${result.version}</b> — Chrome обновит расширение автоматически в ближайшее время.`;
       statusEl.className = 'update-status update-available';
@@ -565,6 +569,16 @@ async function checkForUpdates() {
     statusEl.className = 'update-status update-error';
   }
   btn.disabled = false;
+}
+
+function isNewerVersion(remote, local) {
+  const r = remote.split('.').map(Number);
+  const l = local.split('.').map(Number);
+  for (let i = 0; i < 3; i++) {
+    if ((r[i] || 0) > (l[i] || 0)) return true;
+    if ((r[i] || 0) < (l[i] || 0)) return false;
+  }
+  return false;
 }
 
 // Показываем баннер вверху попапа (не зависит от активного таба)
@@ -584,7 +598,7 @@ async function autoCheckUpdates() {
     const result = await chrome.runtime.sendMessage({ type: 'CHECK_UPDATE' });
     if (!result || !result.ok) return;
     const current = chrome.runtime.getManifest().version;
-    if (result.version !== current) showUpdateBanner(result.version, current);
+    if (isNewerVersion(result.version, current)) showUpdateBanner(result.version, current);
   } catch {}
 }
 
@@ -658,4 +672,30 @@ async function init() {
   autoCheckUpdates();
 }
 
-init();
+if (typeof module === 'undefined') init();
+
+// ===== Test exports (Node.js only, no-op in browser) =====
+if (typeof module !== 'undefined') {
+  module.exports = {
+    escapeHtml,
+    wordForm,
+    extractCleanTitle,
+    getSourceDisplayName,
+    setSourceName,
+    getSourceNames,
+    translateText,
+    storageGet,
+    storageSet,
+    wrapWordsClickable,
+    isNewerVersion,
+    getDueCards,
+    gradeCard,
+    addWordToDictionary,
+    removeWordFromDictionary,
+    backupToSync,
+    restoreFromSync,
+    bumpStat,
+    _setDictionary: (d) => { dictionary = d; },
+    _getDictionary: () => dictionary,
+  };
+}

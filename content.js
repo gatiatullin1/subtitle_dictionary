@@ -536,39 +536,67 @@
     return t.trim(); // пустую строку обработает popup ("Без источника")
   }
 
+  // Serial chain prevents read-modify-write races when words are saved rapidly.
+  let _saveChain = Promise.resolve();
+
   function saveWord(word, context, translation) {
     const source = {
       title: extractPageTitle(),
       url: window.location.href.replace(/#.*$/, '').replace(/\?.*$/, '')
     };
-    chrome.storage.local.get(['rsd_dictionary', 'rsd_stats'], res => {
-      const dict = res.rsd_dictionary || [];
-      if (dict.some(d => d.word.toLowerCase() === word.toLowerCase())) return;
-      dict.unshift({
-        id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-        word, translation, context, source,
-        addedAt: Date.now(),
-        interval: 0, repetitions: 0, easeFactor: 2.5, dueAt: Date.now()
+    _saveChain = _saveChain.then(() => new Promise(resolve => {
+      chrome.storage.local.get(['rsd_dictionary', 'rsd_stats'], res => {
+        const dict = res.rsd_dictionary || [];
+        if (dict.some(d => d.word.toLowerCase() === word.toLowerCase())) {
+          resolve();
+          return;
+        }
+        dict.unshift({
+          id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          word, translation, context, source,
+          addedAt: Date.now(),
+          interval: 0, repetitions: 0, easeFactor: 2.5, dueAt: Date.now()
+        });
+        const stats = res.rsd_stats || { wordsAdded: 0, reviewsDone: 0, linesTranslated: 0 };
+        stats.wordsAdded = (stats.wordsAdded || 0) + 1;
+        chrome.storage.local.set({ rsd_dictionary: dict, rsd_stats: stats }, resolve);
       });
-      const stats = res.rsd_stats || { wordsAdded: 0, reviewsDone: 0, linesTranslated: 0 };
-      stats.wordsAdded = (stats.wordsAdded || 0) + 1;
-      chrome.storage.local.set({ rsd_dictionary: dict, rsd_stats: stats });
-    });
+    }));
   }
 
   // ─── Init ────────────────────────────────────────────────────────────────────
-  injectStyles();
-  createTooltip();
-  startSearch();
+  if (typeof module === 'undefined') {
+    injectStyles();
+    createTooltip();
+    startSearch();
 
-  setInterval(() => {
-    if (observedNode && !document.contains(observedNode)) {
-      observer && observer.disconnect();
-      observer = null;
-      observedNode = null;
-      lastText = '';
-      hideTooltip();
-      startSearch();
-    }
-  }, 3000);
+    setInterval(() => {
+      if (observedNode && !document.contains(observedNode)) {
+        observer && observer.disconnect();
+        observer = null;
+        observedNode = null;
+        lastText = '';
+        hideTooltip();
+        startSearch();
+      }
+    }, 3000);
+  }
+
+  // ===== Test exports (Node.js only) =====
+  if (typeof module !== 'undefined') {
+    module.exports = {
+      wordNear,
+      sortByPosition,
+      extractSubtitleText,
+      translateText,
+      extractPageTitle,
+      saveWord,
+      toggleWord,
+      _getSelectedWords: () => selectedWords,
+      _setSelectedWords: (w) => { selectedWords = [...w]; },
+      _setObservedNode: (n) => { observedNode = n; },
+      _setLastText: (t) => { lastText = t; },
+      _getLastText: () => lastText,
+    };
+  }
 })();

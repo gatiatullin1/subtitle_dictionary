@@ -16,6 +16,8 @@ function saveHistory(history) {
   return chrome.storage.session.set({ subtitleHistory: history });
 }
 
+const _messageHandlers = {};
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'NEW_SUBTITLE_LINE') {
     loadHistory().then(async (history) => {
@@ -69,3 +71,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 });
+
+// ===== Test exports (Node.js only) =====
+if (typeof module !== 'undefined') {
+  module.exports = { loadHistory, saveHistory, MAX_HISTORY };
+}
