@@ -545,12 +545,8 @@ async function checkForUpdates() {
     if (!result || !result.ok) throw new Error();
     if (result.version !== current) {
       showUpdateBanner(result.version, current);
-      statusEl.innerHTML = `
-        Доступна версия <b>${result.version}</b>.
-        <button id="reload-ext-btn" class="reload-btn">Перезагрузить расширение</button>
-      `;
+      statusEl.innerHTML = `Доступна версия <b>${result.version}</b> — Chrome обновит расширение автоматически в ближайшее время.`;
       statusEl.className = 'update-status update-available';
-      document.getElementById('reload-ext-btn').addEventListener('click', () => chrome.runtime.reload());
     } else {
       statusEl.textContent = '✓ Актуальная версия';
       statusEl.className = 'update-status update-ok';
@@ -568,9 +564,9 @@ function showUpdateBanner(remoteVer, currentVer) {
   const text   = document.getElementById('update-banner-text');
   const reload = document.getElementById('update-banner-reload');
   if (!banner || !text || !reload) return;
-  text.textContent = `Доступна версия ${remoteVer} (у вас ${currentVer})`;
+  text.textContent = `Доступна версия ${remoteVer} (у вас ${currentVer}) — обновится автоматически`;
   banner.style.display = 'flex';
-  reload.onclick = () => chrome.runtime.reload();
+  reload.style.display = 'none'; // CWS обновляет сам, кнопка не нужна
 }
 
 // Тихая автопроверка при открытии попапа
