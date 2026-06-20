@@ -213,6 +213,9 @@
         }
       }
 
+      // Квота: ровно 1 подсветка на каждое выбранное слово
+      const quota = new Map(words.map(w => [w.toLowerCase(), 1]));
+
       nodes.forEach(textNode => {
         const text = textNode.textContent;
         regex.lastIndex = 0;
@@ -223,11 +226,18 @@
         let last = 0, m;
         while ((m = regex.exec(text)) !== null) {
           if (m.index > last) frag.appendChild(document.createTextNode(text.slice(last, m.index)));
-          const span = document.createElement('span');
-          span.className = 'rsd-highlight';
-          span.textContent = m[0];
-          frag.appendChild(span);
           last = m.index + m[0].length;
+
+          const key = m[0].toLowerCase();
+          if ((quota.get(key) || 0) > 0) {
+            const span = document.createElement('span');
+            span.className = 'rsd-highlight';
+            span.textContent = m[0];
+            frag.appendChild(span);
+            quota.set(key, quota.get(key) - 1);
+          } else {
+            frag.appendChild(document.createTextNode(m[0]));
+          }
         }
         if (last < text.length) frag.appendChild(document.createTextNode(text.slice(last)));
         textNode.parentNode.replaceChild(frag, textNode);
