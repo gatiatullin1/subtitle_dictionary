@@ -1,15 +1,16 @@
 // Content script для hdrezka.ag
-// Перехватывает клики на субтитрах, определяет слово через caretRangeFromPoint,
-// показывает тултип с переводом. Не модифицирует DOM плеера.
-
 (function () {
-  let lastText = '';
-  let observer = null;
-  let observedNode = null;
+  let observer      = null;
+  let observedNode  = null;
   let searchInterval = null;
-  let activeWord = null;
   let mutationDebounce = null;
+  let lastText      = '';
   let clickAttached = false;
+
+  // Мультивыбор слов
+  let selectedWords = [];
+  let fetchId       = 0;
+  let lastContext   = '';
 
   // ─── Стили ──────────────────────────────────────────────────────────────────
   function injectStyles() {
@@ -23,21 +24,55 @@
       #rsd-tooltip {
         position: fixed;
         display: none;
-        background: rgba(10,10,10,0.93);
+        background: rgba(10,10,10,0.95);
         color: #fff;
         border-radius: 10px;
         padding: 12px 14px;
         z-index: 2147483647;
-        min-width: 170px;
-        max-width: 270px;
+        min-width: 180px;
+        max-width: 290px;
         box-shadow: 0 6px 24px rgba(0,0,0,0.6);
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
         font-size: 14px;
         line-height: 1.5;
         pointer-events: all;
       }
-      #rsd-tooltip-word  { font-weight: 600; font-size: 16px; }
-      #rsd-tooltip-transl { color: #7eb8ff; font-size: 13px; margin-top: 3px; min-height: 18px; }
+      #rsd-tooltip-words {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+        margin-bottom: 6px;
+      }
+      .rsd-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 3px;
+        background: rgba(255,255,255,0.15);
+        border-radius: 5px;
+        padding: 2px 7px 2px 8px;
+        font-size: 14px;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      .rsd-pill:hover { background: rgba(255,255,255,0.27); }
+      .rsd-pill-x {
+        font-size: 11px;
+        opacity: 0.55;
+        line-height: 1;
+        cursor: pointer;
+      }
+      .rsd-pill-x:hover { opacity: 1; }
+      #rsd-tooltip-hint {
+        font-size: 11px;
+        color: rgba(255,255,255,0.4);
+        margin-bottom: 4px;
+      }
+      #rsd-tooltip-transl {
+        color: #7eb8ff;
+        font-size: 13px;
+        min-height: 18px;
+        margin-bottom: 2px;
+      }
       #rsd-tooltip-actions { display: flex; gap: 6px; margin-top: 10px; }
       #rsd-tooltip-add {
         flex: 1; background: #2563eb; color: #fff; border: none;
@@ -60,7 +95,8 @@
     const div = document.createElement('div');
     div.id = 'rsd-tooltip';
     div.innerHTML = `
-      <div id="rsd-tooltip-word"></div>
+      <div id="rsd-tooltip-words"></div>
+      <div id="rsd-tooltip-hint">ещё клик — добавить слово к фразе</div>
       <div id="rsd-tooltip-transl">...</div>
       <div id="rsd-tooltip-actions">
         <button id="rsd-tooltip-add">+ В словарь</button>
@@ -76,74 +112,136 @@
     });
     div.querySelector('#rsd-tooltip-speak').addEventListener('click', e => {
       e.stopPropagation();
-      if (activeWord) speak(activeWord);
+      if (selectedWords.length) speak(selectedWords.join(' '));
     });
     document.addEventListener('click', e => {
       const t = document.getElementById('rsd-tooltip');
-      if (t && !t.contains(e.target)) hideTooltip();
+      if (t && t.style.display !== 'none' && !t.contains(e.target)) hideTooltip();
     });
   }
 
   function hideTooltip() {
     const t = document.getElementById('rsd-tooltip');
     if (t) t.style.display = 'none';
-    activeWord = null;
+    selectedWords = [];
+    fetchId++;
   }
 
-  async function showTooltip(word, x, y, context) {
-    activeWord = word;
+  // ─── Логика мультивыбора ─────────────────────────────────────────────────────
+  function toggleWord(word, x, y, context) {
+    lastContext = context;
+    const lc = word.toLowerCase();
+    const idx = selectedWords.findIndex(w => w.toLowerCase() === lc);
+    if (idx !== -1) {
+      selectedWords.splice(idx, 1);
+    } else {
+      selectedWords.push(word);
+    }
+
+    if (selectedWords.length === 0) {
+      hideTooltip();
+      return;
+    }
+
     const tooltip = document.getElementById('rsd-tooltip');
     if (!tooltip) return;
 
-    tooltip.querySelector('#rsd-tooltip-word').textContent = word;
-    tooltip.querySelector('#rsd-tooltip-transl').textContent = '...';
+    // Показываем тултип; позиционируем только при первом открытии
+    if (tooltip.style.display === 'none') {
+      tooltip.style.display = 'block';
+      positionTooltip(tooltip, x, y);
+    } else {
+      tooltip.style.display = 'block';
+    }
 
-    const addBtn = tooltip.querySelector('#rsd-tooltip-add');
+    renderPills();
+    startTranslation();
+  }
+
+  function renderPills() {
+    const wordsEl = document.getElementById('rsd-tooltip-words');
+    if (!wordsEl) return;
+    wordsEl.innerHTML = '';
+    selectedWords.forEach(w => {
+      const pill = document.createElement('span');
+      pill.className = 'rsd-pill';
+      pill.innerHTML = `${w} <span class="rsd-pill-x">✕</span>`;
+      pill.querySelector('.rsd-pill-x').addEventListener('click', e => {
+        e.stopPropagation();
+        const lc = w.toLowerCase();
+        selectedWords = selectedWords.filter(sw => sw.toLowerCase() !== lc);
+        if (selectedWords.length === 0) { hideTooltip(); return; }
+        renderPills();
+        startTranslation();
+      });
+      wordsEl.appendChild(pill);
+    });
+
+    const hint = document.getElementById('rsd-tooltip-hint');
+    if (hint) hint.style.display = selectedWords.length > 0 ? 'block' : 'none';
+  }
+
+  async function startTranslation() {
+    const myId = ++fetchId;
+    const phrase = selectedWords.join(' ');
+
+    const transl = document.getElementById('rsd-tooltip-transl');
+    const addBtn = document.getElementById('rsd-tooltip-add');
+    if (!transl || !addBtn) return;
+
+    transl.textContent = '...';
     addBtn.textContent = '+ В словарь';
     addBtn.disabled = true;
     addBtn.onclick = null;
 
-    tooltip.style.display = 'block';
-    positionTooltip(tooltip, x, y);
-
-    chrome.storage.local.get(['rsd_dictionary'], async res => {
-      const dict = res.rsd_dictionary || [];
-      const existing = dict.find(d => d.word.toLowerCase() === word.toLowerCase());
-
-      if (existing) {
-        tooltip.querySelector('#rsd-tooltip-transl').textContent = existing.translation;
+    // Для одиночного слова проверяем словарь
+    if (selectedWords.length === 1) {
+      const dictEntry = await getFromDict(selectedWords[0]);
+      if (myId !== fetchId) return;
+      if (dictEntry) {
+        transl.textContent = dictEntry.translation;
         addBtn.textContent = '✓ В словаре';
         addBtn.disabled = true;
         return;
       }
+    }
 
-      try {
-        const translation = await translateWord(word);
-        if (activeWord !== word) return;
-        tooltip.querySelector('#rsd-tooltip-transl').textContent = translation;
-        addBtn.disabled = false;
-        addBtn.onclick = e => {
-          e.stopPropagation();
-          saveWord(word, context, translation);
-          addBtn.textContent = '✓ Добавлено';
-          addBtn.disabled = true;
-        };
-      } catch {
-        tooltip.querySelector('#rsd-tooltip-transl').textContent = '(ошибка перевода)';
-      }
+    // Переводим фразу
+    try {
+      const translation = await translateText(phrase);
+      if (myId !== fetchId) return;
+      transl.textContent = translation;
+      addBtn.disabled = false;
+      addBtn.onclick = e => {
+        e.stopPropagation();
+        saveWord(phrase, lastContext, translation);
+        addBtn.textContent = '✓ Добавлено';
+        addBtn.disabled = true;
+      };
+    } catch {
+      if (myId !== fetchId) return;
+      transl.textContent = '(ошибка перевода)';
+    }
+  }
+
+  function getFromDict(word) {
+    return new Promise(resolve => {
+      chrome.storage.local.get(['rsd_dictionary'], res => {
+        const dict = res.rsd_dictionary || [];
+        resolve(dict.find(d => d.word.toLowerCase() === word.toLowerCase()) || null);
+      });
     });
   }
 
   function positionTooltip(tooltip, x, y) {
-    const tw = Math.max(tooltip.offsetWidth, 170);
-    const th = Math.max(tooltip.offsetHeight, 80);
-    // Показываем над курсором (субтитры обычно снизу)
+    const tw = Math.max(tooltip.offsetWidth, 180);
+    const th = Math.max(tooltip.offsetHeight, 90);
     let top = y - th - 12;
     if (top < 10) top = y + 12;
     let left = x - tw / 2;
     if (left < 10) left = 10;
     if (left + tw > window.innerWidth - 10) left = window.innerWidth - tw - 10;
-    tooltip.style.top = `${top}px`;
+    tooltip.style.top  = `${top}px`;
     tooltip.style.left = `${left}px`;
   }
 
@@ -155,7 +253,6 @@
     let node = range.startContainer;
     let pos  = range.startOffset;
 
-    // Если попали на элемент (не текстовый узел) — ищем первый текстовый потомок
     if (node.nodeType !== Node.TEXT_NODE) {
       const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT);
       const textNode = walker.nextNode();
@@ -167,19 +264,15 @@
     return wordNear(node.textContent, pos);
   }
 
-  // Ищет слово в тексте начиная с pos, затем расширяет поиск на ±5 символов
-  // (на случай клика на пробел или пунктуацию между словами)
   function wordNear(text, pos) {
     const safe = Math.min(Math.max(pos, 0), text.length);
     for (let d = 0; d <= 5; d++) {
       for (const p of (d === 0 ? [safe] : [safe - d, safe + d])) {
         if (p < 0 || p >= text.length) continue;
         if (!/[A-Za-z']/.test(text[p])) continue;
-
         let s = p, e = p;
         while (s > 0 && /[A-Za-z']/.test(text[s - 1])) s--;
         while (e < text.length && /[A-Za-z']/.test(text[e])) e++;
-
         const word = text.slice(s, e);
         if (/[A-Za-z]/.test(word)) return word;
       }
@@ -201,10 +294,8 @@
   function extractSubtitleText(node) {
     const italics = Array.from(node.querySelectorAll('i')).filter(el => isVisible(el) && el.textContent.trim());
     if (italics.length > 0) return italics.map(el => el.textContent.trim()).filter(Boolean).join('\n');
-
     const children = Array.from(node.children).filter(el => isVisible(el) && el.textContent.trim());
     if (children.length > 0) return children.map(el => el.textContent.trim()).filter(Boolean).join('\n');
-
     return node.textContent.trim();
   }
 
@@ -216,7 +307,7 @@
       if (!word) return;
       e.stopPropagation();
       const context = extractSubtitleText(container);
-      showTooltip(word, e.clientX, e.clientY, context);
+      toggleWord(word, e.clientX, e.clientY, context);
     });
   }
 
@@ -243,14 +334,10 @@
     handleMutation(container);
   }
 
-  function findSubtitleContainer() {
-    return document.querySelector('#pjs_cdnplayer_subtitle');
-  }
-
   function startSearch() {
     if (searchInterval) clearInterval(searchInterval);
     searchInterval = setInterval(() => {
-      const container = findSubtitleContainer();
+      const container = document.querySelector('#pjs_cdnplayer_subtitle');
       if (container) {
         attachObserver(container);
         clearInterval(searchInterval);
@@ -260,10 +347,10 @@
   }
 
   // ─── Утилиты ────────────────────────────────────────────────────────────────
-  async function translateWord(word) {
-    const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=ru&dt=t&q=${encodeURIComponent(word)}`;
+  async function translateText(text) {
+    const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=ru&dt=t&q=${encodeURIComponent(text)}`;
     const res = await fetch(url);
-    if (!res.ok) throw new Error();
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
     return data[0].map(c => c[0]).join('');
   }
@@ -296,7 +383,6 @@
   createTooltip();
   startSearch();
 
-  // SPA: если контейнер исчез из DOM — перезапускаем поиск
   setInterval(() => {
     if (observedNode && !document.contains(observedNode)) {
       observer && observer.disconnect();
