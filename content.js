@@ -1,5 +1,6 @@
 // Content script для hdrezka.ag
-// Делает слова в субтитрах кликабельными прямо на видео
+// Перехватывает клики на субтитрах, определяет слово через caretRangeFromPoint,
+// показывает тултип с переводом. Не модифицирует DOM плеера.
 
 (function () {
   let lastText = '';
@@ -8,25 +9,16 @@
   let searchInterval = null;
   let activeWord = null;
   let mutationDebounce = null;
+  let clickAttached = false;
 
-  // ─── Стили, инжектируемые на страницу ───────────────────────────────────────
+  // ─── Стили ──────────────────────────────────────────────────────────────────
   function injectStyles() {
     if (document.getElementById('rsd-styles')) return;
     const s = document.createElement('style');
     s.id = 'rsd-styles';
     s.textContent = `
-      .rsd-word {
-        cursor: pointer;
-        border-radius: 2px;
-        padding: 0 1px;
-        border-bottom: 1px dashed rgba(255,255,255,0.55);
-        transition: background 0.1s;
-      }
-      .rsd-word:hover { background: rgba(255,210,0,0.35); }
-      .rsd-word.rsd-in-dict {
-        background: rgba(82,183,136,0.25);
-        border-bottom-color: #52b788;
-      }
+      #pjs_cdnplayer_subtitle,
+      #pjs_cdnplayer_subtitle * { cursor: pointer !important; }
 
       #rsd-tooltip {
         position: fixed;
@@ -49,17 +41,15 @@
       #rsd-tooltip-actions { display: flex; gap: 6px; margin-top: 10px; }
       #rsd-tooltip-add {
         flex: 1; background: #2563eb; color: #fff; border: none;
-        border-radius: 6px; padding: 6px 10px; font-size: 12px; cursor: pointer;
+        border-radius: 6px; padding: 6px 10px; font-size: 12px; cursor: pointer !important;
       }
       #rsd-tooltip-add:hover:not(:disabled) { background: #1d4ed8; }
-      #rsd-tooltip-add:disabled { background: #3a7d44; cursor: default; }
+      #rsd-tooltip-add:disabled { background: #3a7d44; cursor: default !important; }
       #rsd-tooltip-speak, #rsd-tooltip-close {
         background: rgba(255,255,255,0.1); color: #fff; border: none;
-        border-radius: 6px; padding: 6px 9px; font-size: 12px; cursor: pointer;
+        border-radius: 6px; padding: 6px 9px; font-size: 12px; cursor: pointer !important;
       }
-      #rsd-tooltip-speak:hover, #rsd-tooltip-close:hover {
-        background: rgba(255,255,255,0.22);
-      }
+      #rsd-tooltip-speak:hover, #rsd-tooltip-close:hover { background: rgba(255,255,255,0.22); }
     `;
     document.head.appendChild(s);
   }
@@ -80,20 +70,17 @@
     `;
     document.body.appendChild(div);
 
-    div.querySelector('#rsd-tooltip-close').addEventListener('click', (e) => {
+    div.querySelector('#rsd-tooltip-close').addEventListener('click', e => {
       e.stopPropagation();
       hideTooltip();
     });
-    div.querySelector('#rsd-tooltip-speak').addEventListener('click', (e) => {
+    div.querySelector('#rsd-tooltip-speak').addEventListener('click', e => {
       e.stopPropagation();
       if (activeWord) speak(activeWord);
     });
-
-    document.addEventListener('click', (e) => {
+    document.addEventListener('click', e => {
       const t = document.getElementById('rsd-tooltip');
-      if (t && !t.contains(e.target) && !e.target.classList.contains('rsd-word')) {
-        hideTooltip();
-      }
+      if (t && !t.contains(e.target)) hideTooltip();
     });
   }
 
@@ -103,21 +90,7 @@
     activeWord = null;
   }
 
-  function positionTooltip(tooltip, anchor) {
-    const r = anchor.getBoundingClientRect();
-    const tw = Math.max(tooltip.offsetWidth, 170);
-    const th = Math.max(tooltip.offsetHeight, 80);
-    // показываем над словом (субтитры обычно снизу)
-    let top = r.top - th - 10;
-    if (top < 10) top = r.bottom + 10;
-    let left = r.left + r.width / 2 - tw / 2;
-    if (left < 10) left = 10;
-    if (left + tw > window.innerWidth - 10) left = window.innerWidth - tw - 10;
-    tooltip.style.top = `${top}px`;
-    tooltip.style.left = `${left}px`;
-  }
-
-  async function showTooltip(word, anchorEl, context) {
+  async function showTooltip(word, x, y, context) {
     activeWord = word;
     const tooltip = document.getElementById('rsd-tooltip');
     if (!tooltip) return;
@@ -131,11 +104,11 @@
     addBtn.onclick = null;
 
     tooltip.style.display = 'block';
-    positionTooltip(tooltip, anchorEl);
+    positionTooltip(tooltip, x, y);
 
-    chrome.storage.local.get(['rsd_dictionary'], async (res) => {
+    chrome.storage.local.get(['rsd_dictionary'], async res => {
       const dict = res.rsd_dictionary || [];
-      const existing = dict.find((d) => d.word.toLowerCase() === word.toLowerCase());
+      const existing = dict.find(d => d.word.toLowerCase() === word.toLowerCase());
 
       if (existing) {
         tooltip.querySelector('#rsd-tooltip-transl').textContent = existing.translation;
@@ -146,17 +119,14 @@
 
       try {
         const translation = await translateWord(word);
-        if (activeWord !== word) return; // тултип уже сменился
+        if (activeWord !== word) return;
         tooltip.querySelector('#rsd-tooltip-transl').textContent = translation;
         addBtn.disabled = false;
-        addBtn.onclick = (e) => {
+        addBtn.onclick = e => {
           e.stopPropagation();
           saveWord(word, context, translation);
           addBtn.textContent = '✓ Добавлено';
           addBtn.disabled = true;
-          // подсвечиваем все вхождения этого слова как сохранённые
-          document.querySelectorAll(`.rsd-word[data-word="${CSS.escape(word)}"]`)
-            .forEach((s) => s.classList.add('rsd-in-dict'));
         };
       } catch {
         tooltip.querySelector('#rsd-tooltip-transl').textContent = '(ошибка перевода)';
@@ -164,122 +134,71 @@
     });
   }
 
-  // ─── Утилиты ────────────────────────────────────────────────────────────────
-  async function translateWord(word) {
-    const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=ru&dt=t&q=${encodeURIComponent(word)}`;
-    const res = await fetch(url);
-    if (!res.ok) throw new Error();
-    const data = await res.json();
-    return data[0].map((c) => c[0]).join('');
+  function positionTooltip(tooltip, x, y) {
+    const tw = Math.max(tooltip.offsetWidth, 170);
+    const th = Math.max(tooltip.offsetHeight, 80);
+    // Показываем над курсором (субтитры обычно снизу)
+    let top = y - th - 12;
+    if (top < 10) top = y + 12;
+    let left = x - tw / 2;
+    if (left < 10) left = 10;
+    if (left + tw > window.innerWidth - 10) left = window.innerWidth - tw - 10;
+    tooltip.style.top = `${top}px`;
+    tooltip.style.left = `${left}px`;
   }
 
-  function speak(text) {
-    const u = new SpeechSynthesisUtterance(text);
-    u.lang = 'en-US';
-    speechSynthesis.cancel();
-    speechSynthesis.speak(u);
-  }
+  // ─── Определение слова под курсором ─────────────────────────────────────────
+  function getWordAtPoint(x, y) {
+    // caretRangeFromPoint — Chrome-only, для расширения подходит идеально
+    const range = document.caretRangeFromPoint(x, y);
+    if (!range || range.startContainer.nodeType !== Node.TEXT_NODE) return null;
 
-  function saveWord(word, context, translation) {
-    chrome.storage.local.get(['rsd_dictionary', 'rsd_stats'], (res) => {
-      const dict = res.rsd_dictionary || [];
-      if (dict.some((d) => d.word.toLowerCase() === word.toLowerCase())) return;
-      dict.unshift({
-        id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-        word, translation, context,
-        addedAt: Date.now(),
-        interval: 0, repetitions: 0, easeFactor: 2.5, dueAt: Date.now()
-      });
-      const stats = res.rsd_stats || { wordsAdded: 0, reviewsDone: 0, linesTranslated: 0 };
-      stats.wordsAdded = (stats.wordsAdded || 0) + 1;
-      chrome.storage.local.set({ rsd_dictionary: dict, rsd_stats: stats });
-    });
+    const text = range.startContainer.textContent;
+    const pos = range.startOffset;
+
+    let start = pos;
+    let end = pos;
+    while (start > 0 && /[A-Za-z']/.test(text[start - 1])) start--;
+    while (end < text.length && /[A-Za-z']/.test(text[end])) end++;
+
+    const word = text.slice(start, end);
+    return /[A-Za-z]/.test(word) ? word : null;
   }
 
   // ─── Субтитры ────────────────────────────────────────────────────────────────
   function isVisible(el) {
-    // Проходим вверх по дереву — плеер может скрывать трек через родительский контейнер
     let node = el;
     while (node && node !== document.body) {
       const st = window.getComputedStyle(node);
-      if (
-        st.display === 'none' ||
-        st.visibility === 'hidden' ||
-        parseFloat(st.opacity) < 0.01
-      ) return false;
+      if (st.display === 'none' || st.visibility === 'hidden' || parseFloat(st.opacity) < 0.01) return false;
       node = node.parentElement;
     }
-    // Элемент без реальных размеров — не рендерится
     return el.offsetHeight > 0 || el.offsetWidth > 0;
   }
 
   function extractSubtitleText(node) {
-    const targets = getSubtitleTargets(node);
-    // Если getSubtitleTargets вернул сам контейнер — берём весь textContent
-    if (targets.length === 0 || targets[0] === node) {
-      return node.textContent.trim();
-    }
-    return targets.map(el => el.textContent.trim()).filter(Boolean).join('\n');
+    const italics = Array.from(node.querySelectorAll('i')).filter(el => isVisible(el) && el.textContent.trim());
+    if (italics.length > 0) return italics.map(el => el.textContent.trim()).filter(Boolean).join('\n');
+
+    const children = Array.from(node.children).filter(el => isVisible(el) && el.textContent.trim());
+    if (children.length > 0) return children.map(el => el.textContent.trim()).filter(Boolean).join('\n');
+
+    return node.textContent.trim();
   }
 
-  // Возвращает элементы, в которых лежит текст субтитров.
-  // Пробует <i>, потом любые дочерние элементы, потом сам контейнер.
-  function getSubtitleTargets(container) {
-    const italics = Array.from(container.querySelectorAll('i'))
-      .filter(el => isVisible(el) && el.textContent.trim());
-    if (italics.length > 0) return italics;
-
-    const children = Array.from(container.children)
-      .filter(el => isVisible(el) && el.textContent.trim());
-    if (children.length > 0) return children;
-
-    // Фолбэк: сам контейнер (субтитры как plain text)
-    return container.textContent.trim() ? [container] : [];
-  }
-
-  function wrapWordsInContainer(container) {
-    if (observer) observer.disconnect();
-
-    const targets = getSubtitleTargets(container);
-
-
-    if (targets.length === 0) {
-      if (observer) observer.observe(container, { childList: true, subtree: true, characterData: true });
-      return;
-    }
-
-    const context = targets.map(el => el.textContent.trim()).filter(Boolean).join(' ');
-
-    targets.forEach(el => {
-      const text = el.textContent;
-      if (!text.trim()) return;
-      el.innerHTML = text.replace(/[A-Za-z']+/g, word =>
-        `<span class="rsd-word" data-word="${word}">${word}</span>`
-      );
+  function attachClickInterceptor(container) {
+    if (clickAttached) return;
+    clickAttached = true;
+    container.addEventListener('click', e => {
+      const word = getWordAtPoint(e.clientX, e.clientY);
+      if (!word) return;
+      e.stopPropagation();
+      const context = extractSubtitleText(container);
+      showTooltip(word, e.clientX, e.clientY, context);
     });
-
-    container.querySelectorAll('.rsd-word').forEach(span => {
-      span.addEventListener('click', e => {
-        e.stopPropagation();
-        showTooltip(span.dataset.word, span, context);
-      });
-    });
-
-    chrome.storage.local.get(['rsd_dictionary'], res => {
-      const dict = res.rsd_dictionary || [];
-      const known = new Set(dict.map(d => d.word.toLowerCase()));
-      container.querySelectorAll('.rsd-word').forEach(span => {
-        if (known.has(span.dataset.word.toLowerCase())) span.classList.add('rsd-in-dict');
-      });
-    });
-
-    if (observer) {
-      observer.observe(container, { childList: true, subtree: true, characterData: true });
-    }
   }
 
   function handleMutation(container) {
-    // Debounce 250ms — плеер может на мгновение показать оба трека при переключении
     clearTimeout(mutationDebounce);
     mutationDebounce = setTimeout(() => {
       const text = extractSubtitleText(container);
@@ -289,7 +208,6 @@
           type: 'NEW_SUBTITLE_LINE',
           text, url: window.location.href, title: document.title, timestamp: Date.now()
         });
-        wrapWordsInContainer(container);
       }
     }, 250);
   }
@@ -299,6 +217,7 @@
     observedNode = container;
     observer = new MutationObserver(() => handleMutation(container));
     observer.observe(container, { childList: true, subtree: true, characterData: true });
+    attachClickInterceptor(container);
     handleMutation(container);
   }
 
@@ -318,17 +237,51 @@
     }, 1000);
   }
 
+  // ─── Утилиты ────────────────────────────────────────────────────────────────
+  async function translateWord(word) {
+    const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=ru&dt=t&q=${encodeURIComponent(word)}`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error();
+    const data = await res.json();
+    return data[0].map(c => c[0]).join('');
+  }
+
+  function speak(text) {
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = 'en-US';
+    speechSynthesis.cancel();
+    speechSynthesis.speak(u);
+  }
+
+  function saveWord(word, context, translation) {
+    chrome.storage.local.get(['rsd_dictionary', 'rsd_stats'], res => {
+      const dict = res.rsd_dictionary || [];
+      if (dict.some(d => d.word.toLowerCase() === word.toLowerCase())) return;
+      dict.unshift({
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        word, translation, context,
+        addedAt: Date.now(),
+        interval: 0, repetitions: 0, easeFactor: 2.5, dueAt: Date.now()
+      });
+      const stats = res.rsd_stats || { wordsAdded: 0, reviewsDone: 0, linesTranslated: 0 };
+      stats.wordsAdded = (stats.wordsAdded || 0) + 1;
+      chrome.storage.local.set({ rsd_dictionary: dict, rsd_stats: stats });
+    });
+  }
+
+  // ─── Init ────────────────────────────────────────────────────────────────────
   injectStyles();
   createTooltip();
   startSearch();
 
-  // SPA: если наблюдаемый узел исчез из DOM — перезапускаем поиск
+  // SPA: если контейнер исчез из DOM — перезапускаем поиск
   setInterval(() => {
     if (observedNode && !document.contains(observedNode)) {
       observer && observer.disconnect();
       observer = null;
       observedNode = null;
       lastText = '';
+      clickAttached = false;
       hideTooltip();
       startSearch();
     }
