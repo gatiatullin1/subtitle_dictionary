@@ -308,12 +308,14 @@ async function addWordToDictionary(word, context, prefetchedTranslation = null, 
   };
   dictionary.unshift(newEntry);
   await storageSet(STORE_KEYS.DICTIONARY, dictionary);
+  backupToSync(dictionary);
   await bumpStat('wordsAdded');
 }
 
 async function removeWordFromDictionary(id) {
   dictionary = dictionary.filter((d) => d.id !== id);
   await storageSet(STORE_KEYS.DICTIONARY, dictionary);
+  backupToSync(dictionary);
 }
 
 function wordForm(n) {
@@ -504,6 +506,7 @@ async function gradeCard(card, grade) {
   }
   card.dueAt = Date.now() + card.interval * 24 * 60 * 60 * 1000;
   await storageSet(STORE_KEYS.DICTIONARY, dictionary);
+  backupToSync(dictionary);
   await bumpStat('reviewsDone');
 }
 
@@ -585,11 +588,50 @@ async function autoCheckUpdates() {
   } catch {}
 }
 
+// ===== Sync backup (сохраняется при переустановке, привязан к аккаунту Chrome) =====
+
+async function backupToSync(dict) {
+  try {
+    const json = JSON.stringify(dict);
+    const SZ = 7000; // байт, меньше лимита 8192 на ключ
+    const data = {};
+    let n = 0;
+    for (let i = 0; i < json.length; i += SZ, n++) data['rsd_bak_' + n] = json.slice(i, i + SZ);
+    data.rsd_bak_n = n;
+    await new Promise((res, rej) => chrome.storage.sync.set(data, () =>
+      chrome.runtime.lastError ? rej(chrome.runtime.lastError) : res()
+    ));
+  } catch { /* quota exceeded или sync недоступен — не критично */ }
+}
+
+async function restoreFromSync() {
+  return new Promise(resolve => {
+    chrome.storage.sync.get('rsd_bak_n', res => {
+      const n = res.rsd_bak_n || 0;
+      if (!n) return resolve([]);
+      const keys = Array.from({ length: n }, (_, i) => 'rsd_bak_' + i);
+      chrome.storage.sync.get(keys, res2 => {
+        try { resolve(JSON.parse(keys.map(k => res2[k] || '').join('')) || []); }
+        catch { resolve([]); }
+      });
+    });
+  });
+}
+
 // ===== Init =====
 async function init() {
   setupTabs();
 
-  dictionary = await storageGet(STORE_KEYS.DICTIONARY, []);
+  // Если ключ словаря есть в local — используем его, иначе пробуем восстановить из sync
+  const localRes = await new Promise(r => chrome.storage.local.get('rsd_dictionary', r));
+  if ('rsd_dictionary' in localRes) {
+    dictionary = localRes.rsd_dictionary || [];
+    if (dictionary.length > 0) backupToSync(dictionary); // актуализируем бэкап
+  } else {
+    // Свежая установка — пробуем восстановить
+    dictionary = await restoreFromSync();
+    if (dictionary.length > 0) await storageSet(STORE_KEYS.DICTIONARY, dictionary);
+  }
 
   const resp = await chrome.runtime.sendMessage({ type: 'GET_HISTORY' });
   subtitleHistory = (resp && resp.history) || [];
