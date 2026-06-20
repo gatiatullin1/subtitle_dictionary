@@ -431,22 +431,18 @@ async function checkForUpdates() {
   statusEl.textContent = 'Проверяем...';
   statusEl.className = 'update-status';
 
+  const current = chrome.runtime.getManifest().version;
   try {
     const result = await chrome.runtime.sendMessage({ type: 'CHECK_UPDATE' });
     if (!result || !result.ok) throw new Error();
-    const remote = { version: result.version };
-    const current = chrome.runtime.getManifest().version;
-
-    if (remote.version !== current) {
+    if (result.version !== current) {
+      showUpdateBanner(result.version, current);
       statusEl.innerHTML = `
-        Доступна версия <b>${remote.version}</b> (у вас ${current}).<br>
-        Запустите <code>update.bat</code>, затем нажмите кнопку ниже.
+        Доступна версия <b>${result.version}</b>.
         <button id="reload-ext-btn" class="reload-btn">Перезагрузить расширение</button>
       `;
       statusEl.className = 'update-status update-available';
-      document.getElementById('reload-ext-btn').addEventListener('click', () => {
-        chrome.runtime.reload();
-      });
+      document.getElementById('reload-ext-btn').addEventListener('click', () => chrome.runtime.reload());
     } else {
       statusEl.textContent = '✓ Актуальная версия';
       statusEl.className = 'update-status update-ok';
@@ -455,8 +451,28 @@ async function checkForUpdates() {
     statusEl.textContent = 'Ошибка при проверке. Нет интернета?';
     statusEl.className = 'update-status update-error';
   }
-
   btn.disabled = false;
+}
+
+// Показываем баннер вверху попапа (не зависит от активного таба)
+function showUpdateBanner(remoteVer, currentVer) {
+  const banner = document.getElementById('update-banner');
+  const text   = document.getElementById('update-banner-text');
+  const reload = document.getElementById('update-banner-reload');
+  if (!banner || !text || !reload) return;
+  text.textContent = `Доступна версия ${remoteVer} (у вас ${currentVer})`;
+  banner.style.display = 'flex';
+  reload.onclick = () => chrome.runtime.reload();
+}
+
+// Тихая автопроверка при открытии попапа
+async function autoCheckUpdates() {
+  try {
+    const result = await chrome.runtime.sendMessage({ type: 'CHECK_UPDATE' });
+    if (!result || !result.ok) return;
+    const current = chrome.runtime.getManifest().version;
+    if (result.version !== current) showUpdateBanner(result.version, current);
+  } catch {}
 }
 
 // ===== Init =====
@@ -485,6 +501,9 @@ async function init() {
   document.getElementById('dict-search').addEventListener('input', (e) => {
     renderDictionary(e.target.value);
   });
+
+  // Тихая проверка обновлений при каждом открытии попапа
+  autoCheckUpdates();
 }
 
 init();
