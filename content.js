@@ -224,39 +224,59 @@
     return node.textContent.trim();
   }
 
+  // Возвращает элементы, в которых лежит текст субтитров.
+  // Пробует <i>, потом любые дочерние элементы, потом сам контейнер.
+  function getSubtitleTargets(container) {
+    const italics = Array.from(container.querySelectorAll('i'))
+      .filter(el => isVisible(el) && el.textContent.trim());
+    if (italics.length > 0) return italics;
+
+    const children = Array.from(container.children)
+      .filter(el => isVisible(el) && el.textContent.trim());
+    if (children.length > 0) return children;
+
+    // Фолбэк: сам контейнер (субтитры как plain text)
+    return container.textContent.trim() ? [container] : [];
+  }
+
   function wrapWordsInContainer(container) {
-    // Отключаем наблюдатель, чтобы не создавать петлю при изменении DOM
     if (observer) observer.disconnect();
 
-    const italics = Array.from(container.querySelectorAll('i')).filter(isVisible);
-    const context = italics.map((i) => i.textContent.trim()).join(' ');
+    const targets = getSubtitleTargets(container);
 
-    italics.forEach((el) => {
-      el.innerHTML = el.textContent.replace(/[A-Za-z']+/g, (word) => {
-        return `<span class="rsd-word" data-word="${word}">${word}</span>`;
-      });
+    // Лог структуры для диагностики (видно в DevTools → Console на странице rezka)
+    console.log('[RSD] subtitle targets:', targets.map(el => el.tagName + ': ' + JSON.stringify(el.textContent.trim().slice(0, 40))));
+
+    if (targets.length === 0) {
+      if (observer) observer.observe(container, { childList: true, subtree: true, characterData: true });
+      return;
+    }
+
+    const context = targets.map(el => el.textContent.trim()).filter(Boolean).join(' ');
+
+    targets.forEach(el => {
+      const text = el.textContent;
+      if (!text.trim()) return;
+      el.innerHTML = text.replace(/[A-Za-z']+/g, word =>
+        `<span class="rsd-word" data-word="${word}">${word}</span>`
+      );
     });
 
-    // Вешаем клики на слова
-    container.querySelectorAll('.rsd-word').forEach((span) => {
-      span.addEventListener('click', (e) => {
+    container.querySelectorAll('.rsd-word').forEach(span => {
+      span.addEventListener('click', e => {
         e.stopPropagation();
         showTooltip(span.dataset.word, span, context);
       });
     });
 
-    // Подсвечиваем уже сохранённые слова
-    chrome.storage.local.get(['rsd_dictionary'], (res) => {
+    chrome.storage.local.get(['rsd_dictionary'], res => {
       const dict = res.rsd_dictionary || [];
-      const known = new Set(dict.map((d) => d.word.toLowerCase()));
-      container.querySelectorAll('.rsd-word').forEach((span) => {
-        if (known.has(span.dataset.word.toLowerCase())) {
-          span.classList.add('rsd-in-dict');
-        }
+      const known = new Set(dict.map(d => d.word.toLowerCase()));
+      container.querySelectorAll('.rsd-word').forEach(span => {
+        if (known.has(span.dataset.word.toLowerCase())) span.classList.add('rsd-in-dict');
       });
     });
 
-    // Переподключаем наблюдатель
     if (observer) {
       observer.observe(container, { childList: true, subtree: true, characterData: true });
     }
