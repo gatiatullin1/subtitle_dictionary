@@ -433,10 +433,13 @@
 
   function extractPageTitle() {
     let t = document.title;
-    t = t.replace(/\s*[-–|]?\s*hdrezka[.\w]*/gi, '');
-    t = t.replace(/\s*смотреть онлайн.*/i, '');
-    t = t.replace(/\s*watch online.*/i, '');
+    t = t.replace(/\s*[-–|]\s*hdrezka[.\w]*/gi, '');
+    t = t.replace(/\s*смотреть.*/i, '');
+    t = t.replace(/\s*watch.*/i, '');
+    t = t.replace(/\s*онлайн.*/i, '');
     t = t.replace(/\s*бесплатно.*/i, '');
+    // Убираем год в конце: (2015), (2015-2022), (2019 - )
+    t = t.replace(/\s*\(\d{4}[\s–\-]*\d*\)\s*$/, '');
     return t.trim() || document.location.hostname;
   }
 

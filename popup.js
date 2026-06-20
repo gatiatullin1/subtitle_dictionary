@@ -37,7 +37,7 @@ function setupTabs() {
       document.querySelectorAll('.tab-content').forEach((c) => c.classList.remove('active'));
       btn.classList.add('active');
       document.getElementById(`tab-${btn.dataset.tab}`).classList.add('active');
-      if (btn.dataset.tab === 'dictionary') { renderSourceFilter(); renderDictionary(); }
+      if (btn.dataset.tab === 'dictionary') { renderDictionary(); }
       if (btn.dataset.tab === 'practice') renderPractice();
       if (btn.dataset.tab === 'stats') renderStats();
     });
@@ -47,7 +47,7 @@ function setupTabs() {
 // ===== Word tooltip =====
 let subtitleHistory = [];
 let dictionary = [];
-let currentSource = null; // null = все источники
+let collapsedSources = new Set(); // URL источников, свёрнутых в аккордеоне
 
 let tooltipEl = null;
 let tooltipOutsideHandler = null;
@@ -122,7 +122,6 @@ async function showWordTooltip(span, word, context, source = null) {
       await addWordToDictionary(word, context, fetchedTranslation, source);
       addBtn.textContent = '✓ Добавлено';
       addBtn.disabled = true;
-      renderSourceFilter();
       renderSubtitleList();
     });
   }
@@ -156,7 +155,6 @@ function promptRenameSource(url, currentName) {
   const newName = window.prompt(`Переименовать «${currentName}»:`, currentName);
   if (newName === null) return; // отмена
   setSourceName(url, newName.trim() || '');
-  renderSourceFilter();
   renderDictionary(document.getElementById('dict-search')?.value || '');
 }
 
@@ -165,64 +163,16 @@ function promptRenameSource(url, currentName) {
 function extractCleanTitle(raw) {
   if (!raw) return '';
   let t = raw;
-  t = t.replace(/\s*[-–|]?\s*hdrezka[.\w]*/gi, '');
-  t = t.replace(/\s*смотреть онлайн.*/i, '');
-  t = t.replace(/\s*watch online.*/i, '');
+  t = t.replace(/\s*[-–|]\s*hdrezka[.\w]*/gi, '');
+  t = t.replace(/\s*смотреть.*/i, '');
+  t = t.replace(/\s*watch.*/i, '');
+  t = t.replace(/\s*онлайн.*/i, '');
   t = t.replace(/\s*бесплатно.*/i, '');
+  t = t.replace(/\s*\(\d{4}[\s–\-]*\d*\)\s*$/, '');
   return t.trim();
 }
 
-function renderSourceFilter() {
-  const container = document.getElementById('source-filter');
-  if (!container) return;
-
-  const map = new Map(); // url → { rawTitle, count }
-  dictionary.forEach(d => {
-    const url   = d.source?.url   || '';
-    const title = d.source?.title || '';
-    if (!map.has(url)) map.set(url, { url, rawTitle: title, count: 0 });
-    map.get(url).count++;
-  });
-
-  if (map.size <= 1) { container.innerHTML = ''; return; }
-
-  const sources = [
-    { url: null, displayName: 'Все', count: dictionary.length },
-    ...Array.from(map.values()).map(s => ({
-      url: s.url,
-      displayName: getSourceDisplayName(s.url, s.rawTitle),
-      count: s.count
-    }))
-  ];
-
-  container.innerHTML = sources.map(s => {
-    const active = currentSource === s.url ? 'active' : '';
-    const key    = s.url === null ? '' : escapeHtml(s.url);
-    const label  = escapeHtml(s.displayName);
-    const editBtn = s.url
-      ? `<span class="pill-edit" data-url="${key}" title="Переименовать">✏️</span>`
-      : '';
-    return `<button class="source-pill ${active}" data-url="${key}" title="${label}">
-      ${label} <span class="pill-count">${s.count}</span>${editBtn}
-    </button>`;
-  }).join('');
-
-  container.querySelectorAll('.source-pill').forEach(btn => {
-    btn.addEventListener('click', e => {
-      // клик по ✏️ — переименовываем, не переключаем фильтр
-      if (e.target.classList.contains('pill-edit')) {
-        e.stopPropagation();
-        const url  = btn.dataset.url;
-        const name = btn.querySelector('.pill-count') ? btn.childNodes[0].textContent.trim() : '';
-        promptRenameSource(url, name);
-        return;
-      }
-      currentSource = btn.dataset.url === '' ? null : btn.dataset.url;
-      renderSourceFilter();
-      renderDictionary(document.getElementById('dict-search').value);
-    });
-  });
-}
+// renderSourceFilter удалён — заменён аккордеоном в renderDictionary
 
 // ===== Subtitles list =====
 
@@ -365,57 +315,112 @@ async function removeWordFromDictionary(id) {
   await storageSet(STORE_KEYS.DICTIONARY, dictionary);
 }
 
+function wordForm(n) {
+  if (n % 100 >= 11 && n % 100 <= 14) return 'слов';
+  const l = n % 10;
+  if (l === 1) return 'слово';
+  if (l >= 2 && l <= 4) return 'слова';
+  return 'слов';
+}
+
 function renderDictionary(filter = '') {
   const container = document.getElementById('dictionary-list');
   const q = filter.trim().toLowerCase();
 
-  let list = dictionary;
-
-  // Фильтр по источнику
-  if (currentSource !== null) {
-    list = list.filter(d => (d.source?.url || '') === currentSource);
-  }
-
-  // Фильтр по поиску
-  if (q) {
-    list = list.filter(d =>
-      d.word.toLowerCase().includes(q) || d.translation.toLowerCase().includes(q)
-    );
-  }
+  const list = q
+    ? dictionary.filter(d =>
+        d.word.toLowerCase().includes(q) || d.translation.toLowerCase().includes(q))
+    : dictionary;
 
   if (list.length === 0) {
     container.innerHTML = '<p class="empty-state">Словарь пуст. Кликай по словам в субтитрах, чтобы добавить их.</p>';
     return;
   }
 
-  // Показываем источник только когда не выбран конкретный фильм
-  const showSource = currentSource === null;
+  // Группировка по источнику
+  const groups = new Map();
+  list.forEach(d => {
+    const url     = d.source?.url   || '';
+    const raw     = d.source?.title || '';
+    const cleaned = extractCleanTitle(raw) || raw;
+    if (!groups.has(url)) groups.set(url, { url, displayName: getSourceDisplayName(url, cleaned), words: [] });
+    groups.get(url).words.push(d);
+  });
 
-  container.innerHTML = list
-    .map(d => `
-      <div class="dict-card" data-id="${d.id}">
-        <div class="dict-word-block">
-          <div class="dict-word">${escapeHtml(d.word)} <button class="speak-btn" data-speak="${escapeHtml(d.word)}" title="Озвучить">🔊</button></div>
-          <div class="dict-translation">${escapeHtml(d.translation)}</div>
-          ${d.context ? `<div class="dict-context">«${escapeHtml(d.context)}»</div>` : ''}
-          ${showSource && d.source ? `<div class="dict-source">${escapeHtml(getSourceDisplayName(d.source.url, d.source.title))}</div>` : ''}
-        </div>
-        <div class="dict-actions">
-          <button class="icon-btn danger" data-remove="${d.id}" title="Удалить">✕</button>
-        </div>
+  const sortedGroups = [...groups.values()].sort((a, b) => b.words.length - a.words.length);
+  const searching = q.length > 0;
+
+  const dictCardHtml = d => `
+    <div class="dict-card" data-id="${d.id}">
+      <div class="dict-word-block">
+        <div class="dict-word">${escapeHtml(d.word)} <button class="speak-btn" data-speak="${escapeHtml(d.word)}" title="Озвучить">🔊</button></div>
+        <div class="dict-translation">${escapeHtml(d.translation)}</div>
+        ${d.context ? `<div class="dict-context">«${escapeHtml(d.context)}»</div>` : ''}
       </div>
-    `)
-    .join('');
+      <div class="dict-actions">
+        <button class="icon-btn danger" data-remove="${d.id}" title="Удалить">✕</button>
+      </div>
+    </div>`;
 
-  container.querySelectorAll('[data-remove]').forEach((btn) => {
+  if (sortedGroups.length === 1 && !sortedGroups[0].url) {
+    // Один безымянный источник — плоский список
+    container.innerHTML = list.map(dictCardHtml).join('');
+  } else {
+    // Аккордеон по сериалам
+    container.innerHTML = sortedGroups.map(group => {
+      const isCollapsed = !searching && collapsedSources.has(group.url);
+      const title   = group.displayName || 'Без источника';
+      const count   = group.words.length;
+      const urlAttr = escapeHtml(group.url);
+      const editBtn = group.url
+        ? `<button class="source-rename-btn" data-url="${urlAttr}" title="Переименовать">✏️</button>`
+        : '';
+      return `
+        <div class="source-group ${isCollapsed ? 'collapsed' : ''}" data-url="${urlAttr}">
+          <div class="source-group-header">
+            <span class="source-toggle"></span>
+            <span class="source-group-title">${escapeHtml(title)}</span>
+            <span class="source-group-count">${count} ${wordForm(count)}</span>
+            ${editBtn}
+          </div>
+          <div class="source-group-body">
+            ${group.words.map(dictCardHtml).join('')}
+          </div>
+        </div>`;
+    }).join('');
+
+    // Сворачивание/разворачивание по клику на заголовок
+    container.querySelectorAll('.source-group-header').forEach(header => {
+      header.addEventListener('click', e => {
+        if (e.target.closest('.source-rename-btn')) return;
+        const group = header.closest('.source-group');
+        const url = group.dataset.url;
+        if (collapsedSources.has(url)) collapsedSources.delete(url);
+        else collapsedSources.add(url);
+        renderDictionary(filter);
+      });
+    });
+
+    // Переименование
+    container.querySelectorAll('.source-rename-btn').forEach(btn => {
+      btn.addEventListener('click', e => {
+        e.stopPropagation();
+        const url = btn.dataset.url;
+        const title = btn.closest('.source-group-header').querySelector('.source-group-title').textContent;
+        promptRenameSource(url, title);
+      });
+    });
+  }
+
+  // Общие обработчики
+  container.querySelectorAll('[data-remove]').forEach(btn => {
     btn.addEventListener('click', async () => {
       await removeWordFromDictionary(btn.dataset.remove);
-      renderSourceFilter();
       renderDictionary(document.getElementById('dict-search').value);
     });
   });
 
-  container.querySelectorAll('.speak-btn').forEach((btn) => {
+  container.querySelectorAll('.speak-btn').forEach(btn => {
     btn.addEventListener('click', () => speak(btn.dataset.speak));
   });
 }
@@ -584,7 +589,6 @@ async function init() {
   setupTabs();
 
   dictionary = await storageGet(STORE_KEYS.DICTIONARY, []);
-  renderSourceFilter();
 
   const resp = await chrome.runtime.sendMessage({ type: 'GET_HISTORY' });
   subtitleHistory = (resp && resp.history) || [];
