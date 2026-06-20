@@ -4,17 +4,23 @@
 (function () {
   let lastText = '';
   let observer = null;
+  let observedNode = null;
   let searchInterval = null;
+
+  function isVisible(el) {
+    const style = window.getComputedStyle(el);
+    return style.display !== 'none' && style.visibility !== 'hidden' && parseFloat(style.opacity) > 0;
+  }
 
   function extractSubtitleText(node) {
     // Внутри контейнера текст лежит в <i> тегах, разделённых <br>
-    // Если <i> нет — берём textContent как запасной вариант
+    // Фильтруем скрытые треки — берём только видимые <i>
     const italics = node.querySelectorAll('i');
     if (italics.length > 0) {
-      return Array.from(italics)
-        .map((el) => el.textContent.trim())
-        .filter(Boolean)
-        .join('\n');
+      const visible = Array.from(italics).filter(isVisible);
+      if (visible.length > 0) {
+        return visible.map((el) => el.textContent.trim()).filter(Boolean).join('\n');
+      }
     }
     return node.textContent.trim();
   }
@@ -35,13 +41,13 @@
 
   function attachObserver(container) {
     if (observer) observer.disconnect();
+    observedNode = container;
     observer = new MutationObserver(() => handleMutation(container));
     observer.observe(container, {
       childList: true,
       subtree: true,
       characterData: true
     });
-    // Захватываем то, что уже видно на экране в момент подключения
     handleMutation(container);
   }
 
@@ -49,27 +55,30 @@
     return document.querySelector('#pjs_cdnplayer_subtitle');
   }
 
-  // Контейнер субтитров появляется в DOM не сразу (плеер подгружается асинхронно),
-  // поэтому опрашиваем страницу, пока не найдём его
-  searchInterval = setInterval(() => {
-    const container = findSubtitleContainer();
-    if (container) {
-      attachObserver(container);
-      clearInterval(searchInterval);
-    }
-  }, 1000);
-
-  // Если SPA-навигация на rezka подменяет плеер без перезагрузки страницы —
-  // на случай "потери" контейнера ищем его заново
-  setInterval(() => {
-    const container = findSubtitleContainer();
-    if (container && observer) {
-      // переподключаемся, если наблюдаемый узел больше не в DOM
-      if (!document.contains(container)) {
+  function startSearch() {
+    if (searchInterval) clearInterval(searchInterval);
+    searchInterval = setInterval(() => {
+      const container = findSubtitleContainer();
+      if (container) {
         attachObserver(container);
+        clearInterval(searchInterval);
+        searchInterval = null;
       }
-    } else if (container && !observer) {
-      attachObserver(container);
+    }, 1000);
+  }
+
+  startSearch();
+
+  // SPA-навигация: проверяем, что НАБЛЮДАЕМЫЙ узел всё ещё в DOM.
+  // document.contains(observedNode) — правильная проверка, т.к. мы следим
+  // за конкретным узлом, а не ищем новый каждый раз.
+  setInterval(() => {
+    if (observedNode && !document.contains(observedNode)) {
+      observer && observer.disconnect();
+      observer = null;
+      observedNode = null;
+      lastText = '';
+      startSearch();
     }
   }, 3000);
 })();
