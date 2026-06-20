@@ -19,7 +19,7 @@
     s.id = 'rsd-styles';
     s.textContent = `
       #pjs_cdnplayer_subtitle,
-      #pjs_cdnplayer_subtitle * { cursor: pointer !important; }
+      #pjs_cdnplayer_subtitle * { cursor: pointer !important; outline: none !important; }
 
       .rsd-highlight {
         color: #f0fffe !important;
