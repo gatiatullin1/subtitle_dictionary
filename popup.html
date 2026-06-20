@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>Rezka Subtitle Dictionary</title>
+<link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="tabs">
+    <button class="tab-btn active" data-tab="subtitles">Субтитры</button>
+    <button class="tab-btn" data-tab="dictionary">Словарь</button>
+    <button class="tab-btn" data-tab="practice">Повторение</button>
+    <button class="tab-btn" data-tab="stats">Статистика</button>
+  </div>
+
+  <div class="tab-content active" id="tab-subtitles">
+    <div class="toolbar">
+      <button id="clear-history-btn" class="ghost-btn">Очистить историю</button>
+    </div>
+    <div id="subtitle-list" class="subtitle-list">
+      <p class="empty-state">Открой видео с субтитрами на rezka — строки появятся здесь.</p>
+    </div>
+  </div>
+
+  <div class="tab-content" id="tab-dictionary">
+    <div class="toolbar">
+      <input type="text" id="dict-search" placeholder="Поиск по словарю...">
+    </div>
+    <div id="dictionary-list" class="dictionary-list">
+      <p class="empty-state">Словарь пуст. Кликай по словам в субтитрах, чтобы добавить их.</p>
+    </div>
+  </div>
+
+  <div class="tab-content" id="tab-practice">
+    <div id="practice-area" class="practice-area">
+      <p class="empty-state">В словаре пока нет слов для повторения.</p>
+    </div>
+  </div>
+
+  <div class="tab-content" id="tab-stats">
+    <div id="stats-area" class="stats-grid"></div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
