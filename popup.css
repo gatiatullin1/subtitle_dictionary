@@ -46,6 +46,30 @@ body {
   flex-shrink: 0;
 }
 
+.settings-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 14px;
+  background: #f4f6fb;
+  border-bottom: 1px solid #e6e8ee;
+  font-size: 12px;
+  color: #555;
+  flex-shrink: 0;
+}
+.settings-bar label { white-space: nowrap; }
+.settings-bar select {
+  flex: 1;
+  padding: 5px 8px;
+  border: 1px solid #d4d8e0;
+  border-radius: 6px;
+  background: #fff;
+  font-size: 12px;
+  color: #1a1a1a;
+  cursor: pointer;
+}
+.settings-bar select:focus { outline: none; border-color: #2563eb; }
+
 .tab-btn {
   flex: 1;
   padding: 10px 4px;

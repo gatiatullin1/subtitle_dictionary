@@ -11,6 +11,8 @@ document.caretRangeFromPoint = jest.fn(() => null);
 global.chrome = global.chrome || {};
 chrome.runtime = chrome.runtime || { sendMessage: jest.fn(), onMessage: { addListener: jest.fn() } };
 chrome.storage = chrome.storage || { local: { get: jest.fn((_k, cb) => cb({})) } };
+// язык перевода читается из storage + слежение за изменениями
+chrome.storage.onChanged = chrome.storage.onChanged || { addListener: jest.fn() };
 
 const content = require('../content.js');
 
@@ -199,13 +201,13 @@ describe('translateText in content.js', () => {
     await expect(translateText('test')).rejects.toThrow('HTTP 429');
   });
 
-  test('always uses en→ru language pair', async () => {
+  test('auto-detects source and targets the selected language (default ru)', async () => {
     global.fetch = jest.fn(() =>
       Promise.resolve({ ok: true, json: () => Promise.resolve([[['ok', 'ok']]]) })
     );
     await translateText('test');
     const url = global.fetch.mock.calls[0][0];
-    expect(url).toContain('sl=en');
+    expect(url).toContain('sl=auto');
     expect(url).toContain('tl=ru');
   });
 });

@@ -12,6 +12,17 @@
   let fetchId       = 0;
   let lastContext   = '';
   let _tipX = 0, _tipY = 0; // последние координаты клика для перепозиционирования
+  let targetLang    = 'ru'; // язык перевода (выбирается в попапе, ключ rsd_target_lang)
+
+  // Загружаем язык перевода и следим за его изменением из попапа
+  chrome.storage.local.get(['rsd_target_lang'], res => {
+    if (res.rsd_target_lang) targetLang = res.rsd_target_lang;
+  });
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area === 'local' && changes.rsd_target_lang) {
+      targetLang = changes.rsd_target_lang.newValue || 'ru';
+    }
+  });
 
   // ─── Стили ──────────────────────────────────────────────────────────────────
   function injectStyles() {
@@ -580,7 +591,7 @@
 
   // ─── Утилиты ────────────────────────────────────────────────────────────────
   async function translateText(text) {
-    const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=ru&dt=t&q=${encodeURIComponent(text)}`;
+    const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=${targetLang}&dt=t&q=${encodeURIComponent(text)}`;
     const res = await fetch(url);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();

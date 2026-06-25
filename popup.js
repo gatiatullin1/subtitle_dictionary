@@ -1,7 +1,8 @@
 // ===== Storage helpers =====
 const STORE_KEYS = {
   DICTIONARY: 'rsd_dictionary',
-  STATS: 'rsd_stats'
+  STATS: 'rsd_stats',
+  TARGET_LANG: 'rsd_target_lang'
 };
 
 function storageGet(key, fallback) {
@@ -19,8 +20,11 @@ function storageSet(key, value) {
 }
 
 // ===== Translation (Google Translate public endpoint, no key) =====
-async function translateText(text, targetLang = 'ru', sourceLang = 'en') {
-  const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${sourceLang}&tl=${targetLang}&dt=t&q=${encodeURIComponent(text)}`;
+// Язык перевода выбирается в попапе и хранится в chrome.storage.local (rsd_target_lang).
+let targetLang = 'ru';
+
+async function translateText(text, lang = targetLang, sourceLang = 'auto') {
+  const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${sourceLang}&tl=${lang}&dt=t&q=${encodeURIComponent(text)}`;
   const res = await fetch(url);
   if (!res.ok) throw new Error('Translate request failed');
   const data = await res.json();
@@ -678,9 +682,28 @@ async function importDictionary(file) {
   }
 }
 
+// ===== Язык перевода =====
+async function setupLanguageSelector() {
+  targetLang = await storageGet(STORE_KEYS.TARGET_LANG, 'ru');
+  const select = document.getElementById('target-lang');
+  if (!select) return;
+  // если сохранённого языка нет в списке — оставляем русский
+  if ([...select.options].some((o) => o.value === targetLang)) select.value = targetLang;
+  else { targetLang = 'ru'; select.value = 'ru'; }
+
+  select.addEventListener('change', async () => {
+    targetLang = select.value;
+    await storageSet(STORE_KEYS.TARGET_LANG, targetLang);
+    // освежаем перевод строк, у которых он уже был показан — на новом языке
+    subtitleHistory.forEach((e) => { delete e.translation; });
+    renderSubtitleList();
+  });
+}
+
 // ===== Init =====
 async function init() {
   setupTabs();
+  await setupLanguageSelector();
 
   // Используем local, только если там есть данные; иначе восстанавливаем из sync.
   // Это нужно, чтобы словарь восстанавливался после переустановки или на другом компьютере.
