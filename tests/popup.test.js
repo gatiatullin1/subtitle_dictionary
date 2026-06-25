@@ -47,7 +47,6 @@ const {
   gradeCard,
   addWordToDictionary,
   removeWordFromDictionary,
-  backupToSync,
   restoreFromSync,
   bumpStat,
   _setDictionary,
@@ -496,42 +495,7 @@ describe('removeWordFromDictionary', () => {
   });
 });
 
-// ─── backupToSync / restoreFromSync ──────────────────────────────────────────
-
-describe('backupToSync', () => {
-  beforeEach(() => {
-    chrome.storage.sync.set = jest.fn((_o, cb) => cb && cb());
-    chrome.runtime.lastError = null;
-  });
-
-  test('stores dictionary in chunks of ~7000 bytes', async () => {
-    const dict = [{ id: '1', word: 'test', translation: 'тест' }];
-    await backupToSync(dict);
-    expect(chrome.storage.sync.set).toHaveBeenCalled();
-    const stored = chrome.storage.sync.set.mock.calls[0][0];
-    expect(stored.rsd_bak_n).toBe(1);
-    expect(stored.rsd_bak_0).toBeTruthy();
-  });
-
-  test('splits large dictionary into multiple chunks', async () => {
-    // 7001 chars → 2 chunks
-    const bigWord = 'a'.repeat(7001);
-    const dict = [{ word: bigWord }];
-    await backupToSync(dict);
-    const stored = chrome.storage.sync.set.mock.calls[0][0];
-    expect(stored.rsd_bak_n).toBe(2);
-    expect(stored.rsd_bak_0).toBeTruthy();
-    expect(stored.rsd_bak_1).toBeTruthy();
-  });
-
-  test('does not throw when sync quota is exceeded', async () => {
-    chrome.storage.sync.set = jest.fn((_o, cb) => {
-      chrome.runtime.lastError = { message: 'QUOTA_BYTES_PER_ITEM quota exceeded' };
-      cb();
-    });
-    await expect(backupToSync([{ word: 'test' }])).resolves.not.toThrow();
-  });
-});
+// ─── restoreFromSync (бэкап теперь в background.js) ──────────────────────────
 
 describe('restoreFromSync', () => {
   beforeEach(() => {

@@ -7,8 +7,16 @@ chrome.storage.session.get = jest.fn((_keys, cb) => cb({}));
 chrome.storage.session.set = jest.fn((_obj, cb) => cb && cb());
 chrome.runtime.sendMessage = jest.fn(() => {});
 chrome.runtime.onMessage.addListener = jest.fn();
+chrome.storage.onChanged = { addListener: jest.fn() };
+chrome.runtime.onInstalled = { addListener: jest.fn() };
 
-const { loadHistory, saveHistory, MAX_HISTORY } = require('../background.js');
+const {
+  loadHistory,
+  saveHistory,
+  MAX_HISTORY,
+  backupDictionaryToSync,
+  restoreDictionaryFromSync,
+} = require('../background.js');
 
 beforeEach(() => {
   chrome.storage.session._reset();
@@ -204,5 +212,73 @@ describe('CHECK_UPDATE version logic', () => {
     const remoteVersion = '1.1.0';
     expect(typeof remoteVersion).toBe('string');
     expect(remoteVersion.split('.').length).toBe(3);
+  });
+});
+
+// ─── Dictionary backup/restore (chrome.storage.sync) ──────────────────────────
+
+describe('backupDictionaryToSync', () => {
+  beforeEach(() => {
+    chrome.runtime.lastError = null;
+    chrome.storage.sync.get = jest.fn((_keys, cb) => cb({}));
+    chrome.storage.sync.set = jest.fn((_obj, cb) => cb && cb());
+    chrome.storage.sync.remove = jest.fn((_keys, cb) => cb && cb());
+  });
+
+  test('stores dictionary in chunks with rsd_bak_n marker', () => {
+    backupDictionaryToSync([{ id: '1', word: 'test', translation: 'тест' }]);
+    expect(chrome.storage.sync.set).toHaveBeenCalled();
+    const stored = chrome.storage.sync.set.mock.calls[0][0];
+    expect(stored.rsd_bak_n).toBe(1);
+    expect(stored.rsd_bak_0).toBeTruthy();
+  });
+
+  test('splits large dictionary into multiple chunks', () => {
+    backupDictionaryToSync([{ word: 'a'.repeat(7001) }]); // >7000 → 2 чанка
+    const stored = chrome.storage.sync.set.mock.calls[0][0];
+    expect(stored.rsd_bak_n).toBe(2);
+    expect(stored.rsd_bak_1).toBeTruthy();
+  });
+
+  test('removes stale chunks left from a longer previous dictionary', () => {
+    // В sync остались rsd_bak_0..2 от старого словаря; новый — 1 чанк
+    chrome.storage.sync.get = jest.fn((_keys, cb) =>
+      cb({ rsd_bak_0: 'x', rsd_bak_1: 'y', rsd_bak_2: 'z', rsd_bak_n: 3 }));
+    backupDictionaryToSync([{ word: 'cat' }]);
+    expect(chrome.storage.sync.remove).toHaveBeenCalled();
+    const removed = chrome.storage.sync.remove.mock.calls[0][0];
+    expect(removed).toEqual(expect.arrayContaining(['rsd_bak_1', 'rsd_bak_2']));
+    expect(removed).not.toContain('rsd_bak_0'); // его перезапишут
+  });
+
+  test('does not throw when sync quota is exceeded', () => {
+    chrome.storage.sync.set = jest.fn((_obj, cb) => {
+      chrome.runtime.lastError = { message: 'QUOTA_BYTES quota exceeded' };
+      cb && cb();
+    });
+    expect(() => backupDictionaryToSync([{ word: 'test' }])).not.toThrow();
+  });
+});
+
+describe('restoreDictionaryFromSync', () => {
+  beforeEach(() => { chrome.runtime.lastError = null; });
+
+  test('returns [] when sync is empty', async () => {
+    chrome.storage.sync.get = jest.fn((_keys, cb) => cb({}));
+    expect(await restoreDictionaryFromSync()).toEqual([]);
+  });
+
+  test('reassembles chunked dictionary', async () => {
+    const original = [{ id: '1', word: 'cat', translation: 'кот' }];
+    const json = JSON.stringify(original);
+    chrome.storage.sync.get = jest.fn((keys, cb) =>
+      keys === 'rsd_bak_n' ? cb({ rsd_bak_n: 1 }) : cb({ rsd_bak_0: json }));
+    expect(await restoreDictionaryFromSync()).toEqual(original);
+  });
+
+  test('returns [] on corrupt JSON', async () => {
+    chrome.storage.sync.get = jest.fn((keys, cb) =>
+      keys === 'rsd_bak_n' ? cb({ rsd_bak_n: 1 }) : cb({ rsd_bak_0: 'INVALID' }));
+    expect(await restoreDictionaryFromSync()).toEqual([]);
   });
 });

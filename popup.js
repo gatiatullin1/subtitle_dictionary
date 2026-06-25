@@ -312,14 +312,13 @@ async function addWordToDictionary(word, context, prefetchedTranslation = null, 
   };
   dictionary.unshift(newEntry);
   await storageSet(STORE_KEYS.DICTIONARY, dictionary);
-  backupToSync(dictionary);
+  // Бэкап в sync делает background.js через chrome.storage.onChanged
   await bumpStat('wordsAdded');
 }
 
 async function removeWordFromDictionary(id) {
   dictionary = dictionary.filter((d) => d.id !== id);
   await storageSet(STORE_KEYS.DICTIONARY, dictionary);
-  backupToSync(dictionary);
 }
 
 function wordForm(n) {
@@ -510,7 +509,6 @@ async function gradeCard(card, grade) {
   }
   card.dueAt = Date.now() + card.interval * 24 * 60 * 60 * 1000;
   await storageSet(STORE_KEYS.DICTIONARY, dictionary);
-  backupToSync(dictionary);
   await bumpStat('reviewsDone');
 }
 
@@ -602,22 +600,10 @@ async function autoCheckUpdates() {
   } catch {}
 }
 
-// ===== Sync backup (сохраняется при переустановке, привязан к аккаунту Chrome) =====
-
-async function backupToSync(dict) {
-  try {
-    const json = JSON.stringify(dict);
-    const SZ = 7000; // байт, меньше лимита 8192 на ключ
-    const data = {};
-    let n = 0;
-    for (let i = 0; i < json.length; i += SZ, n++) data['rsd_bak_' + n] = json.slice(i, i + SZ);
-    data.rsd_bak_n = n;
-    await new Promise((res, rej) => chrome.storage.sync.set(data, () =>
-      chrome.runtime.lastError ? rej(chrome.runtime.lastError) : res()
-    ));
-  } catch { /* quota exceeded или sync недоступен — не критично */ }
-}
-
+// ===== Восстановление словаря из sync =====
+// Бэкап в sync выполняет background.js (chrome.storage.onChanged) — единая точка,
+// ловит записи и из content.js, и из popup.js. Здесь — только чтение (страховка
+// на случай, если background ещё не успел восстановить local при открытии попапа).
 async function restoreFromSync() {
   return new Promise(resolve => {
     chrome.storage.sync.get('rsd_bak_n', res => {
@@ -681,7 +667,7 @@ async function importDictionary(file) {
     }
 
     await storageSet(STORE_KEYS.DICTIONARY, dictionary);
-    backupToSync(dictionary);
+    // Бэкап в sync подхватит background.js через onChanged
     renderDictionary(document.getElementById('dict-search')?.value || '');
     showStatus(`Импортировано: ${added} новых слов`, 'ok');
   } catch {
@@ -699,8 +685,8 @@ async function init() {
   const localDict = localRes.rsd_dictionary;
   if (Array.isArray(localDict) && localDict.length > 0) {
     dictionary = localDict;
-    backupToSync(dictionary); // актуализируем бэкап
   } else {
+    // local пуст — пробуем восстановить из sync (страховка к background.onInstalled)
     dictionary = await restoreFromSync();
     if (dictionary.length > 0) await storageSet(STORE_KEYS.DICTIONARY, dictionary);
   }
@@ -758,7 +744,6 @@ if (typeof module !== 'undefined') {
     gradeCard,
     addWordToDictionary,
     removeWordFromDictionary,
-    backupToSync,
     restoreFromSync,
     bumpStat,
     _setDictionary: (d) => { dictionary = d; },

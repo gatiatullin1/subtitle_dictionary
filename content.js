@@ -67,6 +67,11 @@
       .rsd-pill:hover { background: rgba(255,255,255,0.27); }
       .rsd-pill-x { font-size: 11px; opacity: 0.55; line-height: 1; cursor: pointer; }
       .rsd-pill-x:hover { opacity: 1; }
+      .rsd-pill.rsd-saved {
+        background: rgba(52,168,83,0.28);
+        box-shadow: inset 0 0 0 1px rgba(74,222,128,0.5);
+      }
+      .rsd-pill-check { color: #4ade80; font-size: 12px; line-height: 1; }
       #rsd-tooltip-hint {
         font-size: 11px; color: rgba(255,255,255,0.4);
         margin-bottom: 4px; display: none;
@@ -78,7 +83,11 @@
         border-radius: 6px; padding: 6px 10px; font-size: 12px; cursor: pointer !important;
       }
       #rsd-tooltip-add:hover:not(:disabled) { background: #1d4ed8; }
-      #rsd-tooltip-add:disabled { background: #3a7d44; cursor: default !important; }
+      #rsd-tooltip-add:disabled { background: rgba(255,255,255,0.12); color: rgba(255,255,255,0.5); cursor: default !important; }
+      #rsd-tooltip-add.rsd-in-dict:disabled {
+        background: rgba(52,168,83,0.22); color: #4ade80;
+        box-shadow: inset 0 0 0 1px rgba(74,222,128,0.45); cursor: default !important;
+      }
       #rsd-tooltip-speak, #rsd-tooltip-close {
         background: rgba(255,255,255,0.1); color: #fff; border: none;
         border-radius: 6px; padding: 6px 9px; font-size: 12px; cursor: pointer !important;
@@ -314,10 +323,11 @@
     const wordsEl = document.getElementById('rsd-tooltip-words');
     if (!wordsEl) return;
     wordsEl.innerHTML = '';
+    const pillByWord = new Map();
     selectedWords.forEach(w => {
       const pill = document.createElement('span');
       pill.className = 'rsd-pill';
-      pill.innerHTML = `${w} <span class="rsd-pill-x">✕</span>`;
+      pill.innerHTML = `<span class="rsd-pill-text">${w}</span> <span class="rsd-pill-x">✕</span>`;
       pill.querySelector('.rsd-pill-x').addEventListener('click', e => {
         e.stopPropagation();
         selectedWords = selectedWords.filter(sw => sw.toLowerCase() !== w.toLowerCase());
@@ -328,9 +338,24 @@
         startTranslation();
       });
       wordsEl.appendChild(pill);
+      pillByWord.set(w.toLowerCase(), pill);
     });
     const hint = document.getElementById('rsd-tooltip-hint');
     if (hint) hint.style.display = 'block';
+
+    // Отмечаем галочкой слова, которые уже есть в словаре
+    getDictWordSet().then(set => {
+      for (const [lw, pill] of pillByWord) {
+        if (set.has(lw)) {
+          pill.classList.add('rsd-saved');
+          const x = pill.querySelector('.rsd-pill-x');
+          const check = document.createElement('span');
+          check.className = 'rsd-pill-check';
+          check.textContent = '✓';
+          pill.insertBefore(check, x);
+        }
+      }
+    });
   }
 
   async function startTranslation() {
@@ -343,30 +368,34 @@
 
     transl.textContent = '...';
     addBtn.textContent = '+ В словарь';
+    addBtn.classList.remove('rsd-in-dict');
     addBtn.disabled = true;
     addBtn.onclick = null;
 
-    if (selectedWords.length === 1) {
-      const entry = await getFromDict(selectedWords[0]);
-      if (myId !== fetchId) return;
-      if (entry) {
-        transl.textContent = entry.translation;
-        addBtn.textContent = '✓ В словаре';
-        addBtn.disabled = true;
-        repositionTooltip();
-        return;
-      }
+    // Слово/фраза уже в словаре — показываем статус с галочкой, не предлагаем добавить
+    const entry = await getFromDict(phrase);
+    if (myId !== fetchId) return;
+    if (entry) {
+      transl.textContent = entry.translation;
+      addBtn.textContent = '✓ Уже в словаре';
+      addBtn.classList.add('rsd-in-dict');
+      addBtn.disabled = true;
+      repositionTooltip();
+      return;
     }
 
     try {
       const translation = await translateText(phrase);
       if (myId !== fetchId) return;
       transl.textContent = translation;
+      addBtn.textContent = '+ В словарь';
+      addBtn.classList.remove('rsd-in-dict');
       addBtn.disabled = false;
       addBtn.onclick = e => {
         e.stopPropagation();
         saveWord(phrase, lastContext, translation);
         addBtn.textContent = '✓ Добавлено';
+        addBtn.classList.add('rsd-in-dict');
         addBtn.disabled = true;
       };
       repositionTooltip();
@@ -389,6 +418,16 @@
       chrome.storage.local.get(['rsd_dictionary'], res => {
         const dict = res.rsd_dictionary || [];
         resolve(dict.find(d => d.word.toLowerCase() === word.toLowerCase()) || null);
+      });
+    });
+  }
+
+  // Set из слов словаря в нижнем регистре — для быстрой отметки пилюль
+  function getDictWordSet() {
+    return new Promise(resolve => {
+      chrome.storage.local.get(['rsd_dictionary'], res => {
+        const dict = res.rsd_dictionary || [];
+        resolve(new Set(dict.map(d => d.word.toLowerCase())));
       });
     });
   }
