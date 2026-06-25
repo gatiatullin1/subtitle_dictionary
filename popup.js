@@ -556,7 +556,7 @@ async function checkForUpdates() {
     if (!result || !result.ok) throw new Error();
     if (isNewerVersion(result.version, current)) {
       showUpdateBanner(result.version, current);
-      statusEl.innerHTML = `Доступна версия <b>${result.version}</b> — Chrome обновит расширение автоматически в ближайшее время.`;
+      statusEl.innerHTML = `Доступна версия <b>${result.version}</b>. Нажмите «Перезагрузить» вверху, чтобы применить.`;
       statusEl.className = 'update-status update-available';
     } else {
       statusEl.textContent = '✓ Актуальная версия';
@@ -585,9 +585,12 @@ function showUpdateBanner(remoteVer, currentVer) {
   const text   = document.getElementById('update-banner-text');
   const reload = document.getElementById('update-banner-reload');
   if (!banner || !text || !reload) return;
-  text.textContent = `Доступна версия ${remoteVer} (у вас ${currentVer}) — обновится автоматически`;
+  text.textContent = `Доступна версия ${remoteVer} (у вас ${currentVer})`;
   banner.style.display = 'flex';
-  reload.style.display = 'none'; // CWS обновляет сам, кнопка не нужна
+  // chrome.runtime.reload() перечитывает файлы с диска и применяет новую версию
+  reload.style.display = '';
+  reload.textContent = 'Перезагрузить';
+  reload.onclick = () => chrome.runtime.reload();
 }
 
 // Тихая автопроверка при открытии попапа
