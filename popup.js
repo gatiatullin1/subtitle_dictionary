@@ -142,25 +142,26 @@ async function showWordTooltip(span, word, context, source = null) {
 }
 
 // ===== Source names (переименование) =====
-// Хранятся в localStorage: { [url]: customName }
+// Хранятся в localStorage: { [key]: customName }, где key — нормализованное
+// название сериала/фильма (а не URL), чтобы переименование охватывало весь сериал.
 function getSourceNames() {
   try { return JSON.parse(localStorage.getItem('rsd_source_names') || '{}'); } catch { return {}; }
 }
-function setSourceName(url, name) {
+function setSourceName(key, name) {
   const names = getSourceNames();
-  if (name) names[url] = name; else delete names[url];
+  if (name) names[key] = name; else delete names[key];
   localStorage.setItem('rsd_source_names', JSON.stringify(names));
 }
-function getSourceDisplayName(url, fallback) {
-  if (!url) return fallback || 'Без источника';
+function getSourceDisplayName(key, fallback) {
+  if (!key) return fallback || 'Без источника';
   const names = getSourceNames();
-  return names[url] || fallback || 'Без источника';
+  return names[key] || fallback || 'Без источника';
 }
 
-function promptRenameSource(url, currentName) {
+function promptRenameSource(key, currentName) {
   const newName = window.prompt(`Переименовать «${currentName}»:`, currentName);
   if (newName === null) return; // отмена
-  setSourceName(url, newName.trim() || '');
+  setSourceName(key, newName.trim() || '');
   renderDictionary(document.getElementById('dict-search')?.value || '');
 }
 
@@ -347,14 +348,18 @@ function renderDictionary(filter = '') {
     return;
   }
 
-  // Группировка по источнику
+  // Группировка по сериалу/фильму. Ключ — нормализованное название (а не URL):
+  // у разных эпизодов одного сериала URL разный, но название одно, поэтому
+  // группируем по названию, иначе сериал дробится на несколько словарей.
   const groups = new Map();
   list.forEach(d => {
-    const url     = d.source?.url   || '';
     const raw     = d.source?.title || '';
     const cleaned = extractCleanTitle(raw) || raw;
-    if (!groups.has(url)) groups.set(url, { url, displayName: getSourceDisplayName(url, cleaned), words: [] });
-    groups.get(url).words.push(d);
+    const key     = cleaned.trim().toLowerCase(); // '' если источника нет
+    if (!groups.has(key)) {
+      groups.set(key, { key, displayName: getSourceDisplayName(key, cleaned), words: [] });
+    }
+    groups.get(key).words.push(d);
   });
 
   const sortedGroups = [...groups.values()].sort((a, b) => b.words.length - a.words.length);
@@ -372,21 +377,21 @@ function renderDictionary(filter = '') {
       </div>
     </div>`;
 
-  if (sortedGroups.length === 1 && !sortedGroups[0].url) {
+  if (sortedGroups.length === 1 && !sortedGroups[0].key) {
     // Один безымянный источник — плоский список
     container.innerHTML = list.map(dictCardHtml).join('');
   } else {
     // Аккордеон по сериалам
     container.innerHTML = sortedGroups.map(group => {
-      const isCollapsed = !searching && collapsedSources.has(group.url);
+      const isCollapsed = !searching && collapsedSources.has(group.key);
       const title   = group.displayName || 'Без источника';
       const count   = group.words.length;
-      const urlAttr = escapeHtml(group.url);
-      const editBtn = group.url
-        ? `<button class="source-rename-btn" data-url="${urlAttr}" title="Переименовать">✏️</button>`
+      const keyAttr = escapeHtml(group.key);
+      const editBtn = group.key
+        ? `<button class="source-rename-btn" data-key="${keyAttr}" title="Переименовать">✏️</button>`
         : '';
       return `
-        <div class="source-group ${isCollapsed ? 'collapsed' : ''}" data-url="${urlAttr}">
+        <div class="source-group ${isCollapsed ? 'collapsed' : ''}" data-key="${keyAttr}">
           <div class="source-group-header">
             <span class="source-toggle"></span>
             <span class="source-group-title">${escapeHtml(title)}</span>
@@ -404,20 +409,20 @@ function renderDictionary(filter = '') {
       header.addEventListener('click', e => {
         if (e.target.closest('.source-rename-btn')) return;
         const group = header.closest('.source-group');
-        const url = group.dataset.url;
-        if (collapsedSources.has(url)) collapsedSources.delete(url);
-        else collapsedSources.add(url);
+        const key = group.dataset.key;
+        if (collapsedSources.has(key)) collapsedSources.delete(key);
+        else collapsedSources.add(key);
         renderDictionary(filter);
       });
     });
 
-    // Переименование
+    // Переименование (применяется ко всему сериалу — ключ по названию)
     container.querySelectorAll('.source-rename-btn').forEach(btn => {
       btn.addEventListener('click', e => {
         e.stopPropagation();
-        const url = btn.dataset.url;
+        const key = btn.dataset.key;
         const title = btn.closest('.source-group-header').querySelector('.source-group-title').textContent;
-        promptRenameSource(url, title);
+        promptRenameSource(key, title);
       });
     });
   }
